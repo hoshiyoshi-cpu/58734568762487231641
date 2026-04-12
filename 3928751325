@@ -146,7 +146,9 @@ local thinkDelayMax = 1.2
 local listUpdatePending = false
 local forceUpdateList = false
 local lastInputTime = 0
+local lastListUpdate = 0
 local LIST_DEBOUNCE = 0.12
+local OUT_OF_TURN_LIST_RATE = 0.35
 local currentBestMatch = nil
 local lastUpdateHash = ""
 
@@ -3227,8 +3229,10 @@ runConn = RunService.Heartbeat:Connect(function()
             lastRequiredLetter = requiredLetter
         end
         
-        if listUpdatePending and (now - lastInputTime > LIST_DEBOUNCE) then
+        local listRate = isMyTurn and LIST_DEBOUNCE or OUT_OF_TURN_LIST_RATE
+        if listUpdatePending and (now - lastInputTime > listRate) then
             listUpdatePending = false
+            lastListUpdate = now
             UpdateList(lastDetected, lastRequiredLetter)
             
             local visCount = 0
@@ -3261,7 +3265,7 @@ runConn = RunService.Heartbeat:Connect(function()
                 end
             end
             lastDetected = "---"
-        elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList then
+        elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList or isMyTurn ~= lastWasMyTurn then
             currentBestMatch = nil
             lastDetected = detected
             lastRequiredLetter = requiredLetter
