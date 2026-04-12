@@ -332,12 +332,16 @@ local function BinarySearchEndInRange(list, prefix, left, right)
 end
 
 local function GetPrefixRange(bucket, prefix)
-    if not bucket or #bucket == 0 or #prefix == 0 then
-        return 1, #bucket
+    if type(prefix) ~= "string" then
+        prefix = tostring(prefix or "")
+    end
+    if type(bucket) ~= "table" or #bucket == 0 or #prefix == 0 then
+        return 1, (type(bucket) == "table" and #bucket or 0)
     end
 
     local left, right = 1, #bucket
-    if PrefixSearchCache.bucket == bucket and prefix:sub(1, #PrefixSearchCache.prefix) == PrefixSearchCache.prefix then
+    local cachePrefix = PrefixSearchCache.prefix or ""
+    if PrefixSearchCache.bucket == bucket and cachePrefix ~= "" and prefix:sub(1, #cachePrefix) == cachePrefix then
         left = PrefixSearchCache.start
         right = PrefixSearchCache.finish
     end
