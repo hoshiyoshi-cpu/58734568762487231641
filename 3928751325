@@ -146,9 +146,7 @@ local thinkDelayMax = 1.2
 local listUpdatePending = false
 local forceUpdateList = false
 local lastInputTime = 0
-local lastListUpdate = 0
-local LIST_DEBOUNCE = 0.12
-local OUT_OF_TURN_LIST_RATE = 0.35
+local LIST_DEBOUNCE = 0.25
 local currentBestMatch = nil
 local lastUpdateHash = ""
 
@@ -2476,10 +2474,19 @@ UpdateList = function(detectedText, requiredLetter)
         return
     end
     
+    -- Replace with:
     local bucket
     if firstChar and firstChar ~= "" and Buckets then
         bucket = Buckets[firstChar] or {}
     else
+        if not manualSearch then
+            currentBestMatch = nil
+            for _, btn in ipairs(ButtonCache) do
+                if btn then btn.Visible = false end
+            end
+            ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
+            return
+        end
         bucket = Words
     end
     
@@ -3229,10 +3236,8 @@ runConn = RunService.Heartbeat:Connect(function()
             lastRequiredLetter = requiredLetter
         end
         
-        local listRate = isMyTurn and LIST_DEBOUNCE or OUT_OF_TURN_LIST_RATE
-        if listUpdatePending and (now - lastInputTime > listRate) then
+        if listUpdatePending and (now - lastInputTime > LIST_DEBOUNCE) then
             listUpdatePending = false
-            lastListUpdate = now
             UpdateList(lastDetected, lastRequiredLetter)
             
             local visCount = 0
@@ -3265,7 +3270,7 @@ runConn = RunService.Heartbeat:Connect(function()
                 end
             end
             lastDetected = "---"
-        elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList or isMyTurn ~= lastWasMyTurn then
+        elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList then
             currentBestMatch = nil
             lastDetected = detected
             lastRequiredLetter = requiredLetter
