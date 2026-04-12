@@ -16,19 +16,6 @@ local LogService = cloneref(game:GetService("LogService"))
 local GuiService = cloneref(game:GetService("GuiService"))
 
 local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-if type(request) ~= "function" then
-    request = function(opts)
-        if type(opts) == "table" and opts.Url and opts.Method == "GET" then
-            local success, body = pcall(function()
-                return HttpService:GetAsync(opts.Url)
-            end)
-            if success then
-                return {Body = body}
-            end
-        end
-        return nil
-    end
-end
 
 local TOGGLE_KEY = Enum.KeyCode.RightControl
 local MIN_CPM = 50
@@ -225,11 +212,7 @@ local function FetchWords()
     end)
     
     if success and res and res.Body then
-        if writefile then
-            pcall(function()
-                writefile(fileName, res.Body)
-            end)
-        end
+        writefile(fileName, res.Body)
         UpdateStatus("Fetched successfully!", THEME.Success)
     else
         UpdateStatus("Fetch failed! Using cached.", Color3.fromRGB(255, 80, 80))
@@ -262,109 +245,33 @@ end
 
 LoadList(fileName)
 
+if LoadingGui then LoadingGui:Destroy() end
+
+table.sort(Words)
+Buckets = {}
+for _, w in ipairs(Words) do
+    local c = w:sub(1,1) or ""
+    if c == "" then c = "#" end
+    Buckets[c] = Buckets[c] or {}
+    table.insert(Buckets[c], w)
+end
+
 if Config.CustomWords then
     for _, w in ipairs(Config.CustomWords) do
         local clean = w:gsub("[%s%c]+", ""):lower()
         if #clean > 0 and not SeenWords[clean] then
             SeenWords[clean] = true
             table.insert(Words, clean)
+            local c = clean:sub(1,1) or ""
+            if c == "" then c = "#" end
+            Buckets[c] = Buckets[c] or {}
+            table.insert(Buckets[c], clean)
         end
-    end
-end
-
-if LoadingGui then LoadingGui:Destroy() end
-
-table.sort(Words)
-Buckets = {}
-Buckets2 = {}
-for _, w in ipairs(Words) do
-    local c = w:sub(1,1) or ""
-    if c == "" then c = "#" end
-    Buckets[c] = Buckets[c] or {}
-    table.insert(Buckets[c], w)
-
-    if #w >= 2 then
-        local p2 = w:sub(1,2)
-        Buckets2[c] = Buckets2[c] or {}
-        Buckets2[c][p2] = Buckets2[c][p2] or {}
-        table.insert(Buckets2[c][p2], w)
     end
 end
 
 -- Clear memory
 SeenWords = nil
-
-local PrefixSearchCache = {
-    bucket = nil,
-    prefix = "",
-    start = 1,
-    finish = 0
-}
-
-local function BinarySearchStartInRange(list, prefix, left, right)
-    local result = -1
-    while left <= right do
-        local mid = math.floor((left + right) / 2)
-        local word = list[mid]
-        local sub = word:sub(1, #prefix)
-        if sub == prefix then
-            result = mid
-            right = mid - 1
-        elseif sub < prefix then
-            left = mid + 1
-        else
-            right = mid - 1
-        end
-    end
-    return result
-end
-
-local function BinarySearchEndInRange(list, prefix, left, right)
-    local result = -1
-    while left <= right do
-        local mid = math.floor((left + right) / 2)
-        local word = list[mid]
-        local sub = word:sub(1, #prefix)
-        if sub == prefix then
-            result = mid
-            left = mid + 1
-        elseif sub < prefix then
-            left = mid + 1
-        else
-            right = mid - 1
-        end
-    end
-    return result
-end
-
-local function GetPrefixRange(bucket, prefix)
-    if type(prefix) ~= "string" then
-        prefix = tostring(prefix or "")
-    end
-    if type(bucket) ~= "table" or #bucket == 0 or #prefix == 0 then
-        return 1, (type(bucket) == "table" and #bucket or 0)
-    end
-
-    local left, right = 1, #bucket
-    local cachePrefix = PrefixSearchCache.prefix or ""
-    if PrefixSearchCache.bucket == bucket and cachePrefix ~= "" and prefix:sub(1, #cachePrefix) == cachePrefix then
-        left = PrefixSearchCache.start
-        right = PrefixSearchCache.finish
-    end
-
-    local startIndex = BinarySearchStartInRange(bucket, prefix, left, right)
-    if startIndex == -1 then
-        PrefixSearchCache = {bucket = bucket, prefix = prefix, start = 1, finish = 0}
-        return -1, -1
-    end
-
-    local endIndex = BinarySearchEndInRange(bucket, prefix, startIndex, right)
-    PrefixSearchCache.bucket = bucket
-    PrefixSearchCache.prefix = prefix
-    PrefixSearchCache.start = startIndex
-    PrefixSearchCache.finish = endIndex
-    return startIndex, endIndex
-end
 
 local function shuffleTable(t)
     local n = #t
@@ -713,8 +620,7 @@ SearchBox.TextXAlignment = Enum.TextXAlignment.Left
 
 SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
     if UpdateList then
-        listUpdatePending = true
-        lastInputTime = tick()
+        UpdateList(lastDetected, lastRequiredLetter)
     end
 end)
 
@@ -2550,15 +2456,6 @@ UpdateList = function(detectedText, requiredLetter)
              searchPrefix = requiredLetter
         end
     end
-
-    if searchPrefix == "" and not requiredLetter then
-        for _, btn in ipairs(ButtonCache) do
-            if btn then btn.Visible = false end
-        end
-        currentBestMatch = nil
-        ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
-        return
-    end
     
     local firstChar = searchPrefix:sub(1,1)
     if firstChar == "#" then firstChar = nil end
@@ -2566,14 +2463,19 @@ UpdateList = function(detectedText, requiredLetter)
     if (not firstChar or firstChar == "") and requiredLetter then
         firstChar = requiredLetter:sub(1,1):lower()
     end
+
+    if searchPrefix == "" and (not requiredLetter or #requiredLetter == 0) then
+        currentBestMatch = nil
+        for _, btn in ipairs(ButtonCache) do
+            if btn then btn.Visible = false end
+        end
+        ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
+        return
+    end
     
     local bucket
     if firstChar and firstChar ~= "" and Buckets then
-        if #searchPrefix >= 2 and Buckets2 and Buckets2[firstChar] then
-            bucket = Buckets2[firstChar][searchPrefix:sub(1,2)] or Buckets[firstChar] or {}
-        else
-            bucket = Buckets[firstChar] or {}
-        end
+        bucket = Buckets[firstChar] or {}
     else
         bucket = Words
     end
@@ -2583,7 +2485,6 @@ UpdateList = function(detectedText, requiredLetter)
         local fallbackExacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local limit = 80
         
         if bucket then
             local checkWord = function(w)
@@ -2633,24 +2534,20 @@ UpdateList = function(detectedText, requiredLetter)
             if prefix:find("#") or prefix:find("%*") then useBinary = false end
             
             if useBinary and #prefix > 0 then
-                local startIndex, endIndex = GetPrefixRange(bucket, prefix)
+                local startIndex = BinarySearchStart(bucket, prefix)
                 
-                if startIndex ~= -1 and endIndex >= startIndex then
-                    local count = 0
-                    local scanLimit = (#prefix >= 2) and 0 or 2000
-                    for i = startIndex, endIndex do
+                if startIndex ~= -1 then
+                    for i = startIndex, #bucket do
                         local w = bucket[i]
-                        checkWord(w)
                         
-                        count = count + 1
-                        if scanLimit > 0 and count >= scanLimit then break end
+                        if w:sub(1, #prefix) ~= prefix then break end
+                        
+                        checkWord(w)
                     end
                 end
             else
-                local searchLimit = (sortMode == "Random") and 1000 or limit
                 for _, w in ipairs(bucket) do
                     checkWord(w)
-                    if #exacts >= searchLimit then break end
                 end
             end
         end
@@ -2886,9 +2783,10 @@ end
         for char, k in pairs(Keys) do
             local priority = targetKeys[char]
             if priority then
-                k.BackgroundColor3 = colors[priority]
+                k.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                Tween(k, {BackgroundColor3 = colors[priority]}, 0.3)
             else
-                k.BackgroundColor3 = THEME.ItemBG
+                Tween(k, {BackgroundColor3 = THEME.ItemBG}, 0.2)
             end
         end
     end
