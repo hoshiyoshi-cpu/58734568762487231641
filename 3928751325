@@ -2485,6 +2485,7 @@ UpdateList = function(detectedText, requiredLetter)
         local fallbackExacts = {}
         local partials = {}
         local maxPartialLen = 0
+        local maxCollect = manualSearch and 40 or 0
         
         if bucket then
             local checkWord = function(w)
@@ -2543,11 +2544,13 @@ UpdateList = function(detectedText, requiredLetter)
                         if w:sub(1, #prefix) ~= prefix then break end
                         
                         checkWord(w)
+                        if maxCollect > 0 and #exacts >= maxCollect then break end
                     end
                 end
             else
                 for _, w in ipairs(bucket) do
                     checkWord(w)
+                    if maxCollect > 0 and #exacts >= maxCollect then break end
                 end
             end
         end
@@ -2629,6 +2632,12 @@ end
     end
     
     if #matches > 0 then
+        if manualSearch and #matches > 40 then
+            for i = #matches, 41, -1 do
+                matches[i] = nil
+            end
+        end
+
         local filtered = {}
         local padding = {}
 
