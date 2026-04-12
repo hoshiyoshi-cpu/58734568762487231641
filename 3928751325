@@ -2722,7 +2722,29 @@ end
                     return a < b
                 end)
             elseif mode == "Random" then
-                shuffleTable(t)
+                local prefixList = Config.PriorityPrefixes or {}
+                local function getPrefixRank(word)
+                    local lowerWord = word:lower()
+                    for rank, prefix in ipairs(prefixList) do
+                        if prefix ~= "" and lowerWord:sub(1, #prefix) == prefix then
+                            return rank
+                        end
+                    end
+                    return nil
+                end
+
+                local function randomScore(word)
+                    local rank = getPrefixRank(word)
+                    local base = rank and rank or (#prefixList > 0 and 999 or 0)
+                    return base * 100 + #word * 5 + math.random() * 40
+                end
+
+                table.sort(t, function(a, b)
+                    local sa = randomScore(a)
+                    local sb = randomScore(b)
+                    if sa ~= sb then return sa < sb end
+                    return a < b
+                end)
             else
                 -- Group by suffix priority first
                 local priorityGroups = {}
