@@ -15,7 +15,25 @@ local TweenService = cloneref(game:GetService("TweenService"))
 local LogService = cloneref(game:GetService("LogService"))
 local GuiService = cloneref(game:GetService("GuiService"))
 
-local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+local request
+do
+    local reqFn = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if type(reqFn) == "function" then
+        request = reqFn
+    else
+        request = function(opts)
+            if type(opts) == "table" and opts.Url and opts.Method == "GET" then
+                local success, body = pcall(function()
+                    return HttpService:GetAsync(opts.Url)
+                end)
+                if success then
+                    return {Body = body}
+                end
+            end
+            return nil
+        end
+    end
+end
 
 local TOGGLE_KEY = Enum.KeyCode.RightControl
 local MIN_CPM = 50
