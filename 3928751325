@@ -2734,6 +2734,11 @@ end
                     return nil
                 end
 
+                local randomKeys = {}
+                for _, word in ipairs(t) do
+                    randomKeys[word] = math.random()
+                end
+
                 table.sort(t, function(a, b)
                     local ra = getPrefixRank(a)
                     local rb = getPrefixRank(b)
@@ -2743,9 +2748,9 @@ end
                         return ra < rb
                     end
                     if #a ~= #b then return #a < #b end
-                    local raRand = math.random()
-                    local rbRand = math.random()
-                    if raRand ~= rbRand then return raRand < rbRand end
+                    if randomKeys[a] ~= randomKeys[b] then
+                        return randomKeys[a] < randomKeys[b]
+                    end
                     return a < b
                 end)
             else
