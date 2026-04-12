@@ -2736,9 +2736,9 @@ end
 
                 local function randomScore(word)
                     local rank = getPrefixRank(word)
-                    local base = rank and rank or (#priorityPrefixes > 0 and 999 or 1)
-                    local prefixMatchPenalty = (searchPrefix ~= "" and word:sub(1, #searchPrefix) == searchPrefix) and 0 or 200
-                    return base * 100 + #word * 3 + prefixMatchPenalty + math.random() * 20
+                    local base = rank and rank or (#priorityPrefixes > 0 and (#priorityPrefixes + 1) or 1)
+                    local prefixMatchBonus = (searchPrefix ~= "" and word:sub(1, #searchPrefix) == searchPrefix) and -50 or 50
+                    return base * 20 + #word * 5 + prefixMatchBonus + math.random() * 40
                 end
 
                 table.sort(t, function(a, b)
