@@ -2529,25 +2529,30 @@ UpdateList = function(detectedText, requiredLetter)
                 local startIndex = BinarySearchStart(bucket, prefix)
                 
                 if startIndex ~= -1 then
-                    local scanned = 0
+                    local count = 0
                     for i = startIndex, #bucket do
                         local w = bucket[i]
+                        
                         if w:sub(1, #prefix) ~= prefix then break end
+                        
                         checkWord(w)
-                        scanned = scanned + 1
-                        if #exacts >= 50 then break end
-                        if scanned >= 600 then break end
+                        
+                        count = count + 1
+
+                        local hardLimit = 800
+                        local exactLimit = 500
+
+                        if suffixMode ~= "" or lengthMode > 0 then
+                            hardLimit = 2000
+                            exactLimit = 500
+                        end
+
+                        if #exacts >= exactLimit then break end
+                        if count >= hardLimit then break end
+
                     end
                 end
             else
-                local scanned = 0
-                for _, w in ipairs(bucket) do
-                    checkWord(w)
-                    scanned = scanned + 1
-                    if #exacts >= 50 then break end
-                    if scanned >= 600 then break end
-                end
-            end
                 local searchLimit = (sortMode == "Random") and 1000 or limit
                 for _, w in ipairs(bucket) do
                     checkWord(w)
