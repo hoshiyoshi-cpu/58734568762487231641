@@ -61,6 +61,7 @@ local Config = {
     ThinkDelay = 0.8,
     RiskyMistakes = false,
     CustomWords = {},
+    PriorityPrefixes = {},
     MinTypeSpeed = 50,
     MaxTypeSpeed = 3000,
     KeyboardLayout = "QWERTY"
@@ -94,6 +95,28 @@ if Config.SuffixMode and Config.SuffixMode ~= "" and #Config.SuffixModes == 0 th
         end
     end
 end
+
+local function parsePriorityPrefixes(raw)
+    local result = {}
+    if type(raw) == "string" then
+        raw = { raw }
+    end
+    if type(raw) == "table" then
+        for _, item in ipairs(raw) do
+            if type(item) == "string" then
+                for part in item:gmatch("[^,]+") do
+                    local clean = part:gsub("[%s%c]+", ""):lower()
+                    if #clean > 0 then
+                        table.insert(result, clean)
+                    end
+                end
+            end
+        end
+    end
+    return result
+end
+
+Config.PriorityPrefixes = parsePriorityPrefixes(Config.PriorityPrefixes)
 
 local currentCPM = Config.CPM
 local isBlatant = Config.Blatant
@@ -2485,75 +2508,68 @@ UpdateList = function(detectedText, requiredLetter)
         local fallbackExacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local maxCollect = manualSearch and 40 or 0
-        
-        if bucket then
-            local checkWord = function(w)
-                if Blacklist[w] or UsedWords[w] then return end
-                
-                -- Check for main list filtering (suffix/length)
-                -- >>> FIX: Check against all suffixes if multiple are set <
-                if suffixMode ~= "" then
-                    local suffixList = Config.SuffixModes
-                    if suffixList and #suffixList > 1 then
-                        local anyMatch = false
-                        for _, s in ipairs(suffixList) do
-                            if w:sub(-#s) == s then
-                                anyMatch = true
-                                break
-                            end
-                        end
-                        if not anyMatch then return end
-                    else
-                        if w:sub(-#suffixMode) ~= suffixMode then return end
-                    end
-                end
-                
-                local isLengthMatch = true
-                if not tryFallbackLengths and lengthMode > 0 then
-                    isLengthMatch = (#w == lengthMode)
-                elseif tryFallbackLengths and lengthMode > 0 then
-                     isLengthMatch = true
-                end
-                
-                if not isLengthMatch then return end
+        local maxCollect = manualSearch and 100 or 0
 
-                local mLen = GetMatchLength(w, prefix)
-                if mLen == #prefix then
-                    table.insert(exacts, w)
-                elseif #exacts == 0 then
-                    if mLen > maxPartialLen then
-                        maxPartialLen = mLen
-                        partials = {w}
-                    elseif mLen == maxPartialLen and mLen > 0 then
-                        if #partials < 50 then table.insert(partials, w) end
+        local function checkWord(w)
+            if Blacklist[w] or UsedWords[w] then return end
+
+            if suffixMode ~= "" then
+                local suffixList = Config.SuffixModes
+                if suffixList and #suffixList > 1 then
+                    local anyMatch = false
+                    for _, s in ipairs(suffixList) do
+                        if w:sub(-#s) == s then
+                            anyMatch = true
+                            break
+                        end
                     end
+                    if not anyMatch then return end
+                else
+                    if w:sub(-#suffixMode) ~= suffixMode then return end
                 end
             end
 
-            local useBinary = true
-            if prefix:find("#") or prefix:find("%*") then useBinary = false end
-            
-            if useBinary and #prefix > 0 then
-                local startIndex = BinarySearchStart(bucket, prefix)
-                
-                if startIndex ~= -1 then
-                    for i = startIndex, #bucket do
-                        local w = bucket[i]
-                        
-                        if w:sub(1, #prefix) ~= prefix then break end
-                        
-                        checkWord(w)
-                        if maxCollect > 0 and #exacts >= maxCollect then break end
-                    end
+            local isLengthMatch = true
+            if not tryFallbackLengths and lengthMode > 0 then
+                isLengthMatch = (#w == lengthMode)
+            elseif tryFallbackLengths and lengthMode > 0 then
+                isLengthMatch = true
+            end
+            if not isLengthMatch then return end
+
+            local mLen = GetMatchLength(w, prefix)
+            if mLen == #prefix then
+                table.insert(exacts, w)
+            elseif #exacts == 0 then
+                if mLen > maxPartialLen then
+                    maxPartialLen = mLen
+                    partials = {w}
+                elseif mLen == maxPartialLen and mLen > 0 then
+                    if #partials < 50 then table.insert(partials, w) end
                 end
-            else
-                for _, w in ipairs(bucket) do
+            end
+        end
+
+        local useBinary = true
+        if prefix:find("#") or prefix:find("%*") then useBinary = false end
+
+        if useBinary and #prefix > 0 then
+            local startIndex = BinarySearchStart(bucket, prefix)
+            if startIndex ~= -1 then
+                for i = startIndex, #bucket do
+                    local w = bucket[i]
+                    if w:sub(1, #prefix) ~= prefix then break end
                     checkWord(w)
                     if maxCollect > 0 and #exacts >= maxCollect then break end
                 end
             end
+        else
+            for _, w in ipairs(bucket) do
+                checkWord(w)
+                if maxCollect > 0 and #exacts >= maxCollect then break end
+            end
         end
+
         return exacts, partials, maxPartialLen
     end
 
@@ -2632,9 +2648,54 @@ end
     end
     
     if #matches > 0 then
-        if manualSearch and #matches > 40 then
-            for i = #matches, 41, -1 do
-                matches[i] = nil
+        if manualSearch and #matches > 100 then
+            local priorityGroups = {}
+            local normalMatches = {}
+
+            local function getPriorityRank(w)
+                local lowerWord = w:lower()
+                for rank, pref in ipairs(Config.PriorityPrefixes or {}) do
+                    if pref ~= "" and lowerWord:sub(1, #pref) == pref then
+                        return rank
+                    end
+                end
+                return nil
+            end
+
+            for _, w in ipairs(matches) do
+                local rank = getPriorityRank(w)
+                if rank then
+                    priorityGroups[rank] = priorityGroups[rank] or {}
+                    table.insert(priorityGroups[rank], w)
+                else
+                    table.insert(normalMatches, w)
+                end
+            end
+
+            local ranks = {}
+            for rank in pairs(priorityGroups) do table.insert(ranks, rank) end
+            table.sort(ranks)
+
+            if sortMode == "Random" then
+                for _, rank in ipairs(ranks) do
+                    shuffleTable(priorityGroups[rank])
+                end
+                shuffleTable(normalMatches)
+            end
+
+            matches = {}
+            for _, rank in ipairs(ranks) do
+                for _, w in ipairs(priorityGroups[rank]) do
+                    if #matches >= 100 then break end
+                    table.insert(matches, w)
+                end
+                if #matches >= 100 then break end
+            end
+            if #matches < 100 then
+                for _, w in ipairs(normalMatches) do
+                    if #matches >= 100 then break end
+                    table.insert(matches, w)
+                end
             end
         end
 
@@ -2720,6 +2781,8 @@ end
                     if #a ~= #b then return #a < #b end
                     return a < b
                 end)
+            elseif mode == "Random" then
+                shuffleTable(t)
             else
                 -- Group by suffix priority first
                 local priorityGroups = {}
