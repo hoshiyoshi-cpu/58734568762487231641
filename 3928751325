@@ -2747,10 +2747,11 @@ end
                         if rb == nil then return true end
                         return ra < rb
                     end
-                    if #a ~= #b then return #a < #b end
-                    if randomKeys[a] ~= randomKeys[b] then
-                        return randomKeys[a] < randomKeys[b]
+                    local ka, kb = randomKeys[a], randomKeys[b]
+                    if ka ~= kb then
+                        return ka < kb
                     end
+                    if #a ~= #b then return #a < #b end
                     return a < b
                 end)
             else
