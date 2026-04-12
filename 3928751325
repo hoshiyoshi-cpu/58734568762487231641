@@ -1,4 +1,3 @@
-
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
@@ -146,9 +145,10 @@ local thinkDelayMax = 1.2
 local listUpdatePending = false
 local forceUpdateList = false
 local lastInputTime = 0
-local LIST_DEBOUNCE = 0.25
+local LIST_DEBOUNCE = 0.12
 local currentBestMatch = nil
 local lastUpdateHash = ""
+local updateGeneration = 0
 
 if logConn then logConn:Disconnect() end
 logConn = LogService.MessageOut:Connect(function(message, type)
@@ -2433,10 +2433,16 @@ local function BinarySearchStart(list, prefix)
     return result
 end
 
+-- REPLACE WITH:
 UpdateList = function(detectedText, requiredLetter)
     local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode)
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
+
+    updateGeneration = updateGeneration + 1
+    local myGen = updateGeneration
+    task.spawn(function()
+        if myGen ~= updateGeneration then return end
 
     local matches = {}
     local searchPrefix = detectedText
@@ -2464,29 +2470,11 @@ UpdateList = function(detectedText, requiredLetter)
     if (not firstChar or firstChar == "") and requiredLetter then
         firstChar = requiredLetter:sub(1,1):lower()
     end
-
-    if searchPrefix == "" and (not requiredLetter or #requiredLetter == 0) then
-        currentBestMatch = nil
-        for _, btn in ipairs(ButtonCache) do
-            if btn then btn.Visible = false end
-        end
-        ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
-        return
-    end
     
-    -- Replace with:
     local bucket
     if firstChar and firstChar ~= "" and Buckets then
         bucket = Buckets[firstChar] or {}
     else
-        if not manualSearch then
-            currentBestMatch = nil
-            for _, btn in ipairs(ButtonCache) do
-                if btn then btn.Visible = false end
-            end
-            ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
-            return
-        end
         bucket = Words
     end
     
@@ -2495,7 +2483,7 @@ UpdateList = function(detectedText, requiredLetter)
         local fallbackExacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local maxCollect = manualSearch and 100 or 0
+        local limit = 80
         
         if bucket then
             local checkWord = function(w)
@@ -2548,19 +2536,34 @@ UpdateList = function(detectedText, requiredLetter)
                 local startIndex = BinarySearchStart(bucket, prefix)
                 
                 if startIndex ~= -1 then
+                    local count = 0
                     for i = startIndex, #bucket do
                         local w = bucket[i]
                         
                         if w:sub(1, #prefix) ~= prefix then break end
                         
                         checkWord(w)
-                        if maxCollect > 0 and #exacts >= maxCollect then break end
+                        
+                        count = count + 1
+
+                        local hardLimit = 800
+                        local exactLimit = 500
+
+                        if suffixMode ~= "" or lengthMode > 0 then
+                            hardLimit = 3800
+                            exactLimit = 500
+                        end
+
+                        if #exacts >= exactLimit then break end
+                        if count >= hardLimit then break end
+
                     end
                 end
             else
+                local searchLimit = (sortMode == "Random") and 1000 or limit
                 for _, w in ipairs(bucket) do
                     checkWord(w)
-                    if maxCollect > 0 and #exacts >= maxCollect then break end
+                    if #exacts >= searchLimit then break end
                 end
             end
         end
@@ -2642,12 +2645,6 @@ end
     end
     
     if #matches > 0 then
-        if manualSearch and #matches > 100 then
-            for i = #matches, 101, -1 do
-                matches[i] = nil
-            end
-        end
-
         local filtered = {}
         local padding = {}
 
@@ -2727,48 +2724,6 @@ end
                     local pa = getSuffixPriority(a)
                     local pb = getSuffixPriority(b)
                     if pa ~= pb then return pa < pb end
-                    if #a ~= #b then return #a < #b end
-                    return a < b
-                end)
-            elseif mode == "Random" then
-                local priorityPrefixes = Config.PriorityPrefixes or {}
-
-                local function getPrefixRank(word)
-                    local lowerWord = word:lower()
-                    for rank, prefix in ipairs(priorityPrefixes) do
-                        if prefix ~= "" and lowerWord:sub(1, #prefix) == prefix then
-                            return rank
-                        end
-                    end
-                    return nil
-                end
-
-                local randomKeys = {}
-                for _, word in ipairs(t) do
-                    randomKeys[word] = math.random()
-                end
-
-                local function getLengthBucket(word)
-                    return math.floor((#word - 1) / 3)
-                end
-
-                table.sort(t, function(a, b)
-                    local ra = getPrefixRank(a)
-                    local rb = getPrefixRank(b)
-                    if ra ~= rb then
-                        if ra == nil then return false end
-                        if rb == nil then return true end
-                        return ra < rb
-                    end
-                    local la = getLengthBucket(a)
-                    local lb = getLengthBucket(b)
-                    if la ~= lb then
-                        return la < lb
-                    end
-                    local ka, kb = randomKeys[a], randomKeys[b]
-                    if ka ~= kb then
-                        return ka < kb
-                    end
                     if #a ~= #b then return #a < #b end
                     return a < b
                 end)
@@ -2949,7 +2904,10 @@ end
         end
     end
     
-    ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
+    -- REPLACE WITH:
+        if myGen ~= updateGeneration then return end
+        ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
+    end)
 end
 
 SetupSlider(SliderBtn, SliderBg, SliderFill, function(pct)
@@ -3248,26 +3206,12 @@ runConn = RunService.Heartbeat:Connect(function()
         end
 
         if not isVisible then
-            if SearchBox and SearchBox.Text ~= "" then
-                if StatusText.Text ~= "Search Mode" then
-                    StatusText.Text = "Search Mode"
-                    StatusText.TextColor3 = THEME.Accent
-                    Tween(StatusDot, {BackgroundColor3 = THEME.Accent})
-                end
-
-                local visCount = 0
-                for _, btn in ipairs(ButtonCache) do
-                    if btn.Visible then visCount = visCount + 1 end
-                end
-                StatsData.Count.Text = "Words: " .. visCount .. "+"
-            else
-                if StatusText.Text ~= "Not in Round" then
-                    StatusText.Text = "Not in Round"
-                    StatusText.TextColor3 = THEME.SubText
-                    Tween(StatusDot, {BackgroundColor3 = THEME.SubText})
-                    for _, btn in ipairs(ButtonCache) do btn.Visible = false end
-                    StatsData.Count.Text = "Words: 0"
-                end
+            if StatusText.Text ~= "Not in Round" then
+                StatusText.Text = "Not in Round"
+                StatusText.TextColor3 = THEME.SubText
+                Tween(StatusDot, {BackgroundColor3 = THEME.SubText})
+                for _, btn in ipairs(ButtonCache) do btn.Visible = false end
+                StatsData.Count.Text = "Words: 0"
             end
             lastDetected = "---"
         elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList then
