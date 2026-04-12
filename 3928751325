@@ -2722,10 +2722,11 @@ end
                     return a < b
                 end)
             elseif mode == "Random" then
-                local prefixList = Config.PriorityPrefixes or {}
+                local priorityPrefixes = Config.PriorityPrefixes or {}
+
                 local function getPrefixRank(word)
                     local lowerWord = word:lower()
-                    for rank, prefix in ipairs(prefixList) do
+                    for rank, prefix in ipairs(priorityPrefixes) do
                         if prefix ~= "" and lowerWord:sub(1, #prefix) == prefix then
                             return rank
                         end
@@ -2735,14 +2736,16 @@ end
 
                 local function randomScore(word)
                     local rank = getPrefixRank(word)
-                    local base = rank and rank or (#prefixList > 0 and 999 or 0)
-                    return base * 100 + #word * 5 + math.random() * 40
+                    local base = rank and rank or (#priorityPrefixes > 0 and 999 or 1)
+                    local prefixMatchPenalty = (searchPrefix ~= "" and word:sub(1, #searchPrefix) == searchPrefix) and 0 or 200
+                    return base * 100 + #word * 3 + prefixMatchPenalty + math.random() * 20
                 end
 
                 table.sort(t, function(a, b)
                     local sa = randomScore(a)
                     local sb = randomScore(b)
                     if sa ~= sb then return sa < sb end
+                    if #a ~= #b then return #a < #b end
                     return a < b
                 end)
             else
