@@ -6,6 +6,10 @@ local RbxAnalyticsService = game:GetService("RbxAnalyticsService")
 local cloneref = cloneref or function(o) return o end
 local gethui = gethui or function() return CoreGui end
 
+local function DebugLog(msg)
+    print("[Yoshi Debug] " .. tostring(msg))
+end
+
 local CoreGui = cloneref(game:GetService("CoreGui"))
 local Players = cloneref(game:GetService("Players"))
 local VirtualInputManager = cloneref(game:GetService("VirtualInputManager"))
@@ -20,6 +24,7 @@ do
     local reqFn = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if type(reqFn) == "function" then
         request = reqFn
+        DebugLog("Using executor request API")
     else
         request = function(opts)
             if type(opts) == "table" and opts.Url and opts.Method == "GET" then
@@ -29,11 +34,17 @@ do
                 if success then
                     return {Body = body}
                 end
+                DebugLog("HttpService:GetAsync failed for URL: " .. tostring(opts.Url))
+            else
+                DebugLog("Request fallback called with invalid opts: " .. tostring(opts))
             end
             return nil
         end
+        DebugLog("Using HttpService:GetAsync fallback for request")
     end
 end
+
+DebugLog("request set: " .. tostring(type(request)))
 
 local TOGGLE_KEY = Enum.KeyCode.RightControl
 local MIN_CPM = 50
@@ -224,6 +235,7 @@ end
 
 -- Startup: Always fetch fresh word list
 local function FetchWords()
+    DebugLog("FetchWords called")
     UpdateStatus("Fetching latest word list...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = url, Method = "GET"})
@@ -354,6 +366,7 @@ local function GetPrefixRange(bucket, prefix)
         prefix = tostring(prefix or "")
     end
     if type(bucket) ~= "table" or #bucket == 0 or #prefix == 0 then
+        DebugLog("GetPrefixRange early exit: bucket=" .. tostring(type(bucket)) .. ", prefix='" .. tostring(prefix) .. "'")
         return 1, (type(bucket) == "table" and #bucket or 0)
     end
 
