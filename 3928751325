@@ -1,3 +1,4 @@
+
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
@@ -2485,7 +2486,7 @@ UpdateList = function(detectedText, requiredLetter)
         local fallbackExacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local maxCollect = manualSearch and 40 or 0
+        local maxCollect = manualSearch and 300 or 0
         
         if bucket then
             local checkWord = function(w)
@@ -2632,8 +2633,8 @@ end
     end
     
     if #matches > 0 then
-        if manualSearch and #matches > 40 then
-            for i = #matches, 41, -1 do
+        if manualSearch and #matches > 300 then
+            for i = #matches, 301, -1 do
                 matches[i] = nil
             end
         end
@@ -2720,6 +2721,8 @@ end
                     if #a ~= #b then return #a < #b end
                     return a < b
                 end)
+            elseif mode == "Random" then
+                shuffleTable(t)
             else
                 -- Group by suffix priority first
                 local priorityGroups = {}
