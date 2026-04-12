@@ -2486,7 +2486,7 @@ UpdateList = function(detectedText, requiredLetter)
         local fallbackExacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local maxCollect = manualSearch and 300 or 0
+        local maxCollect = manualSearch and 100 or 0
         
         if bucket then
             local checkWord = function(w)
@@ -2633,8 +2633,8 @@ end
     end
     
     if #matches > 0 then
-        if manualSearch and #matches > 300 then
-            for i = #matches, 301, -1 do
+        if manualSearch and #matches > 100 then
+            for i = #matches, 101, -1 do
                 matches[i] = nil
             end
         end
