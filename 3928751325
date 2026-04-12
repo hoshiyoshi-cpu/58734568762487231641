@@ -2434,16 +2434,10 @@ local function BinarySearchStart(list, prefix)
     return result
 end
 
--- REPLACE WITH:
 UpdateList = function(detectedText, requiredLetter)
     local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode)
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
-
-    updateGeneration = updateGeneration + 1
-    local myGen = updateGeneration
-    task.spawn(function()
-        if myGen ~= updateGeneration then return end
 
     local matches = {}
     local searchPrefix = detectedText
@@ -2876,7 +2870,20 @@ end
          StatusText.TextColor3 = THEME.Warning
     end
 
-    for i = 1, math.max(#displayList, #ButtonCache) do
+    -- Replace with:
+    local capturedDisplay = displayList
+    local capturedDetected = detectedText
+    local capturedSearchPrefix = searchPrefix
+    local capturedBacktracked = isBacktracked
+    local myGen = updateGeneration
+    updateGeneration = updateGeneration + 1
+    task.defer(function()
+        if myGen ~= updateGeneration - 1 then return end
+    for i = 1, math.max(#capturedDisplay, #ButtonCache) do
+        local displayList = capturedDisplay
+        local detectedText = capturedDetected
+        local searchPrefix = capturedSearchPrefix
+        local isBacktracked = capturedBacktracked
         local w = displayList[i]
         local btn = ButtonCache[i]
 
@@ -2956,11 +2963,10 @@ end
         end
     end
     
-    -- REPLACE WITH:
-        if myGen ~= updateGeneration then return end
+    -- Replace with:
         ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
-    end)
-end
+    end) -- closes task.defer
+end -- closes UpdateList
 
 SetupSlider(SliderBtn, SliderBg, SliderFill, function(pct)
     local max = isBlatant and MAX_CPM_BLATANT or MAX_CPM_LEGIT
