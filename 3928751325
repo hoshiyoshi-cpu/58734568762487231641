@@ -2734,18 +2734,18 @@ end
                     return nil
                 end
 
-                local function randomScore(word)
-                    local rank = getPrefixRank(word)
-                    local base = rank and rank or (#priorityPrefixes > 0 and (#priorityPrefixes + 1) or 1)
-                    local prefixMatchBonus = (searchPrefix ~= "" and word:sub(1, #searchPrefix) == searchPrefix) and -50 or 50
-                    return base * 20 + #word * 5 + prefixMatchBonus + math.random() * 40
-                end
-
                 table.sort(t, function(a, b)
-                    local sa = randomScore(a)
-                    local sb = randomScore(b)
-                    if sa ~= sb then return sa < sb end
+                    local ra = getPrefixRank(a)
+                    local rb = getPrefixRank(b)
+                    if ra ~= rb then
+                        if ra == nil then return false end
+                        if rb == nil then return true end
+                        return ra < rb
+                    end
                     if #a ~= #b then return #a < #b end
+                    local raRand = math.random()
+                    local rbRand = math.random()
+                    if raRand ~= rbRand then return raRand < rbRand end
                     return a < b
                 end)
             else
