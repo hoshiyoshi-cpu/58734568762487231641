@@ -7,8 +7,22 @@ local cloneref = cloneref or function(o) return o end
 local gethui = gethui or function() return CoreGui end
 
 local function DebugLog(msg)
-    print("[Yoshi Debug] " .. tostring(msg))
+    local text = "[Yoshi Debug] " .. tostring(msg)
+    print(text)
+    warn(text)
 end
+
+local function DebugError(msg)
+    local text = "[Yoshi Error] " .. tostring(msg)
+    print(text)
+    warn(text)
+end
+
+-- Best debug tool: open Roblox Dev Console (F9) and watch the Output tab.
+DebugLog("Starting Yoshi script")
+DebugLog("HttpService type: " .. tostring(HttpService))
+DebugLog("CoreGui type: " .. tostring(CoreGui))
+DebugLog("Players type: " .. tostring(Players))
 
 local CoreGui = cloneref(game:GetService("CoreGui"))
 local Players = cloneref(game:GetService("Players"))
