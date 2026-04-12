@@ -3224,12 +3224,26 @@ runConn = RunService.Heartbeat:Connect(function()
         end
 
         if not isVisible then
-            if StatusText.Text ~= "Not in Round" then
-                StatusText.Text = "Not in Round"
-                StatusText.TextColor3 = THEME.SubText
-                Tween(StatusDot, {BackgroundColor3 = THEME.SubText})
-                for _, btn in ipairs(ButtonCache) do btn.Visible = false end
-                StatsData.Count.Text = "Words: 0"
+            if SearchBox and SearchBox.Text ~= "" then
+                if StatusText.Text ~= "Search Mode" then
+                    StatusText.Text = "Search Mode"
+                    StatusText.TextColor3 = THEME.Accent
+                    Tween(StatusDot, {BackgroundColor3 = THEME.Accent})
+                end
+
+                local visCount = 0
+                for _, btn in ipairs(ButtonCache) do
+                    if btn.Visible then visCount = visCount + 1 end
+                end
+                StatsData.Count.Text = "Words: " .. visCount .. "+"
+            else
+                if StatusText.Text ~= "Not in Round" then
+                    StatusText.Text = "Not in Round"
+                    StatusText.TextColor3 = THEME.SubText
+                    Tween(StatusDot, {BackgroundColor3 = THEME.SubText})
+                    for _, btn in ipairs(ButtonCache) do btn.Visible = false end
+                    StatsData.Count.Text = "Words: 0"
+                end
             end
             lastDetected = "---"
         elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList then
