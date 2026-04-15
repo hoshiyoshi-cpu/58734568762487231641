@@ -328,7 +328,7 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
 end
 
 -- =============================================
--- SMART SORTER (Shortest first, fallback to random)
+-- SMART SORTER (Shortest first with random same-length, fallback to random)
 -- =============================================
 
 -- Track if we have short words available for the current prefix
@@ -336,7 +336,7 @@ local lastShortWordsAvailable = false
 local lastSmartPrefix = ""
 
 local function SmartSort(wordList, currentPrefix, usedWordsSet)
-    -- Filter by custom prefixes first (if any)
+    -- FIRST: Filter by custom prefixes
     local customFiltered = {}
     if Config.CustomWords and #Config.CustomWords > 0 then
         for _, word in ipairs(wordList) do
@@ -351,8 +351,7 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
         customFiltered = wordList
     end
     
-    -- Separate short words (6 letters or less - good for giving opponent fewer letters)
-    -- You can adjust the "short" threshold (currently 6)
+    -- SECOND: Separate short words (6 letters or less)
     local SHORT_THRESHOLD = 6
     local shortWords = {}
     local longWords = {}
@@ -365,13 +364,7 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
         end
     end
     
-    -- Sort short words by length (shortest first)
-    table.sort(shortWords, function(a, b)
-        if #a ~= #b then return #a < #b end
-        return a < b  -- Keep alphabetical for consistency within same length
-    end)
-    
-    -- Check if we have short words available for this prefix
+    -- Check if we have short words available
     local hasShortWords = #shortWords > 0
     
     -- Reset tracking when prefix changes
@@ -379,21 +372,46 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
         lastSmartPrefix = currentPrefix
         lastShortWordsAvailable = hasShortWords
     else
-        -- Update available status (short words might have been used up)
         lastShortWordsAvailable = hasShortWords
     end
     
     local result = {}
     
     if lastShortWordsAvailable and #shortWords > 0 then
-        -- Use short words (prioritize shortest first)
-        -- Limit to 40 total from short words
-        for i = 1, math.min(40, #shortWords) do
-            table.insert(result, shortWords[i])
+        -- Use short words - group by length and shuffle within groups
+        local lengthGroups = {}
+        for _, word in ipairs(shortWords) do
+            local len = #word
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+            end
+            table.insert(lengthGroups[len], word)
+        end
+        
+        -- Shuffle each length group
+        for len, group in pairs(lengthGroups) do
+            for i = #group, 2, -1 do
+                local j = math.random(i)
+                group[i], group[j] = group[j], group[i]
+            end
+        end
+        
+        -- Rebuild sorted by length (shortest first)
+        local sorted = {}
+        for len = 1, SHORT_THRESHOLD do
+            if lengthGroups[len] then
+                for _, word in ipairs(lengthGroups[len]) do
+                    table.insert(sorted, word)
+                end
+            end
+        end
+        
+        -- Limit to 40 words
+        for i = 1, math.min(40, #sorted) do
+            table.insert(result, sorted[i])
         end
     else
-        -- No short words available, fall back to random selection from ALL words
-        -- But still respect custom prefix filter
+        -- No short words available - fallback to random from ALL custom-filtered words
         local randomPool = {}
         for _, word in ipairs(customFiltered) do
             table.insert(randomPool, word)
@@ -1967,7 +1985,6 @@ UpdateList = function(detectedText, requiredLetter)
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
             
         elseif sortMode == "Shortest" then
-            -- Filter by custom prefixes if any
             local customFiltered = {}
             if Config.CustomWords and #Config.CustomWords > 0 then
                 for _, word in ipairs(filtered) do
@@ -1982,14 +1999,37 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            table.sort(customFiltered, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return false
-            end)
+            -- First group by length
+            local lengthGroups = {}
+            for _, word in ipairs(customFiltered) do
+                local len = #word
+                if not lengthGroups[len] then
+                    lengthGroups[len] = {}
+                end
+                table.insert(lengthGroups[len], word)
+            end
+            
+            -- Shuffle each length group
+            for len, group in pairs(lengthGroups) do
+                for i = #group, 2, -1 do
+                    local j = math.random(i)
+                    group[i], group[j] = group[j], group[i]
+                end
+            end
+            
+            -- Rebuild sorted by length with shuffled groups
+            local sorted = {}
+            for len = 1, 20 do  -- assuming max word length 20
+                if lengthGroups[len] then
+                    for _, word in ipairs(lengthGroups[len]) do
+                        table.insert(sorted, word)
+                    end
+                end
+            end
             
             local limited = {}
-            for i = 1, math.min(40, #customFiltered) do
-                table.insert(limited, customFiltered[i])
+            for i = 1, math.min(40, #sorted) do
+                table.insert(limited, sorted[i])
             end
             filtered = limited
             
