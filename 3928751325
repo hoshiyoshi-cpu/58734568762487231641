@@ -158,6 +158,40 @@ local function UpdateStatus(text, color)
     game:GetService("RunService").RenderStepped:Wait()
 end
 
+-- =============================================
+-- LOOKUP FUNCTIONS (Must be defined before FetchTrapsAndGives)
+-- =============================================
+
+-- Pre-compute which words are GIVE words for fast lookup
+local GiveWordsLookup = {}
+local function RefreshGiveWordsLookup()
+    GiveWordsLookup = {}
+    if Config.GiveWords then
+        for _, gw in ipairs(Config.GiveWords) do
+            GiveWordsLookup[gw] = true
+        end
+    end
+end
+
+-- Pre-compute trap prefixes for fast lookup
+local TrapPrefixesLookup = {}
+local function RefreshTrapLookup()
+    TrapPrefixesLookup = {}
+    if Config.TrapPrefixes then
+        for _, tp in ipairs(Config.TrapPrefixes) do
+            TrapPrefixesLookup[tp] = true
+        end
+    end
+end
+
+-- Initialize lookups
+RefreshGiveWordsLookup()
+RefreshTrapLookup()
+
+-- =============================================
+-- FETCH FUNCTIONS
+-- =============================================
+
 local function FetchWords()
     UpdateStatus("Fetching latest word list...", THEME.Warning)
     local success, res = pcall(function()
@@ -184,6 +218,7 @@ local function FetchTrapsAndGives()
             local clean = line:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then table.insert(Config.TrapPrefixes, clean) end
         end
+        RefreshTrapLookup()
         UpdateStatus("Loaded " .. #Config.TrapPrefixes .. " traps!", THEME.Success)
     else
         UpdateStatus("Could not load traps!", Color3.fromRGB(255, 80, 80))
@@ -199,6 +234,7 @@ local function FetchTrapsAndGives()
             local clean = line:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then table.insert(Config.GiveWords, clean) end
         end
+        RefreshGiveWordsLookup()
         UpdateStatus("Loaded " .. #Config.GiveWords .. " give words!", THEME.Success)
     else
         UpdateStatus("Could not load give words!", Color3.fromRGB(255, 80, 80))
@@ -214,6 +250,52 @@ FetchTrapsAndGives()
 
 local Words = {}
 local SeenWords = {}
+
+-- =============================================
+-- FAST STRATEGIC SORTER
+-- =============================================
+
+local function StrategicSort(wordList, currentPrefix, usedWordsSet)
+    local priorityWords = {} -- GIVE words
+    local trapWords = {}     -- Words that LEAD TO traps
+    local shortWords = {}    -- Short words (5 letters or less)
+    local otherWords = {}    -- Everything else
+    
+    for _, word in ipairs(wordList) do
+        local wl = word:lower()
+        
+        -- Check if this is a GIVE word (highest priority)
+        if GiveWordsLookup[wl] then
+            table.insert(priorityWords, word)
+        else
+            -- Check if word is short (good because opponent gets fewer letters)
+            if #wl <= 5 then
+                table.insert(shortWords, word)
+            else
+                table.insert(otherWords, word)
+            end
+        end
+    end
+    
+    -- Sort each category by length (shortest first)
+    local function sortByLength(a, b)
+        if #a ~= #b then return #a < #b end
+        return a < b
+    end
+    
+    table.sort(priorityWords, sortByLength)
+    table.sort(trapWords, sortByLength)
+    table.sort(shortWords, sortByLength)
+    table.sort(otherWords, sortByLength)
+    
+    -- Combine in priority order: GIVE words first, then short words, then others
+    local result = {}
+    for _, w in ipairs(priorityWords) do table.insert(result, w) end
+    for _, w in ipairs(shortWords) do table.insert(result, w) end
+    for _, w in ipairs(otherWords) do table.insert(result, w) end
+    
+    return result
+end
 
 local function LoadList(fname)
     UpdateStatus("Parsing word list...", THEME.Warning)
@@ -421,89 +503,6 @@ end
 local function is_prefix_a_word(prefix)
     local check = prefix_check(prefix)
     return check and check.self_word or false
-end
-
--- =============================================
--- WORD SCORING (for sorting suggestions)
--- =============================================
-
-local function CalculateWordScore(word, currentPrefix, usedWordsSet, roundNumber)
-    local wl = word:lower()
-    local score = 0
-    
-    local nextPrefix = get_prefix_from_word(wl, roundNumber or 4, usedWordsSet)
-    if not nextPrefix then
-        return 999999
-    end
-    
-    local isGiveWord = false
-    if Config.GiveWords then
-        for _, giveWord in ipairs(Config.GiveWords) do
-            if wl == giveWord then
-                isGiveWord = true
-                break
-            end
-        end
-    end
-    
-    if isGiveWord then
-        score = 0
-        local isEliteTrap = false
-        if Config.TrapPrefixes then
-            for _, trap in ipairs(Config.TrapPrefixes) do
-                if nextPrefix == trap then
-                    if #nextPrefix == 4 and not is_prefix_a_word(nextPrefix) then
-                        isEliteTrap = true
-                    end
-                    break
-                end
-            end
-        end
-        if not isEliteTrap then
-            score = 30
-        end
-    else
-        local leadsToTrap = false
-        local trapIsElite = false
-        if Config.TrapPrefixes then
-            for _, trap in ipairs(Config.TrapPrefixes) do
-                if nextPrefix == trap then
-                    leadsToTrap = true
-                    if #nextPrefix == 4 and not is_prefix_a_word(nextPrefix) then
-                        trapIsElite = true
-                    end
-                    break
-                end
-            end
-        end
-        
-        if leadsToTrap then
-            if trapIsElite then
-                score = 100
-            else
-                score = 200
-            end
-        else
-            local optionsCount = prefix_answer_count(nextPrefix, usedWordsSet)
-            local penalty = 0
-            if is_prefix_a_word(nextPrefix) then
-                penalty = 300
-            end
-            
-            local commonLetters = {s = true, e = true, t = true, a = true, i = true, n = true, r = true}
-            if commonLetters[nextPrefix] then
-                penalty = penalty + 150
-            end
-            
-            if wl:match("s$") then
-                penalty = penalty + 50
-            end
-            
-            score = optionsCount * 10 + penalty
-        end
-    end
-    
-    return score
 end
 
 -- =============================================
@@ -1834,28 +1833,9 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        -- Calculate strategic scores and sort by best move first
+        -- FAST STRATEGIC SORT (no lag)
         if sortMode == "Strategic" then
-            local scoredWords = {}
-            local usedCount = 0
-            for _ in pairs(UsedWords) do usedCount = usedCount + 1 end
-            local roundEstimate = math.max(1, math.floor(usedCount / 4) + 1)
-            
-            for _, w in ipairs(filtered) do
-                local score = CalculateWordScore(w, searchPrefix, UsedWords, roundEstimate)
-                table.insert(scoredWords, {word = w, score = score})
-            end
-            
-            table.sort(scoredWords, function(a, b)
-                if a.score ~= b.score then return a.score < b.score end
-                if #a.word ~= #b.word then return #a.word < #b.word end
-                return a.word < b.word
-            end)
-            
-            filtered = {}
-            for _, entry in ipairs(scoredWords) do
-                table.insert(filtered, entry.word)
-            end
+            filtered = StrategicSort(filtered, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
             table.sort(filtered, function(a, b)
                 if #a ~= #b then return #a < #b end
@@ -1868,11 +1848,12 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
+        -- Padding always by length
         table.sort(padding, function(a, b)
             if #a ~= #b then return #a < #b end
             return a < b
         end)
-
+    
         matches = {}
         for _, w in ipairs(filtered) do table.insert(matches, w) end
         for _, w in ipairs(padding) do table.insert(matches, w) end
