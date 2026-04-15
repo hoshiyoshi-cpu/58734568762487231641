@@ -351,7 +351,7 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
         customFiltered = wordList
     end
     
-    -- SECOND: Separate short words (6 letters or less)
+    -- SECOND: Separate short words (6 letters or less) from long words
     local SHORT_THRESHOLD = 6
     local shortWords = {}
     local longWords = {}
@@ -364,72 +364,50 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
         end
     end
     
-    -- Check if we have short words available
-    local hasShortWords = #shortWords > 0
-    
-    -- Reset tracking when prefix changes
-    if currentPrefix ~= lastSmartPrefix then
-        lastSmartPrefix = currentPrefix
-        lastShortWordsAvailable = hasShortWords
-    else
-        lastShortWordsAvailable = hasShortWords
-    end
-    
     local result = {}
     
-    if lastShortWordsAvailable and #shortWords > 0 then
-        -- Use short words - group by length and shuffle within groups
-        local lengthGroups = {}
-        for _, word in ipairs(shortWords) do
-            local len = #word
-            if not lengthGroups[len] then
-                lengthGroups[len] = {}
-            end
-            table.insert(lengthGroups[len], word)
+    -- Group short words by length and shuffle within groups
+    local lengthGroups = {}
+    for _, word in ipairs(shortWords) do
+        local len = #word
+        if not lengthGroups[len] then
+            lengthGroups[len] = {}
         end
-        
-        -- Shuffle each length group
-        for len, group in pairs(lengthGroups) do
-            for i = #group, 2, -1 do
-                local j = math.random(i)
-                group[i], group[j] = group[j], group[i]
-            end
-        end
-        
-        -- Rebuild sorted by length (shortest first)
-        local sorted = {}
-        for len = 1, SHORT_THRESHOLD do
-            if lengthGroups[len] then
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sorted, word)
-                end
-            end
-        end
-        
-        -- Limit to 40 words
-        for i = 1, math.min(40, #sorted) do
-            table.insert(result, sorted[i])
-        end
-    else
-        -- No short words available - fallback to random from ALL custom-filtered words
-        local randomPool = {}
-        for _, word in ipairs(customFiltered) do
-            table.insert(randomPool, word)
-        end
-        
-        -- Shuffle the random pool
-        for i = #randomPool, 2, -1 do
+        table.insert(lengthGroups[len], word)
+    end
+    
+    -- Shuffle each length group
+    for len, group in pairs(lengthGroups) do
+        for i = #group, 2, -1 do
             local j = math.random(i)
-            randomPool[i], randomPool[j] = randomPool[j], randomPool[i]
-        end
-        
-        -- Take first 40 random words
-        for i = 1, math.min(40, #randomPool) do
-            table.insert(result, randomPool[i])
+            group[i], group[j] = group[j], group[i]
         end
     end
     
-    -- Final limit to 40
+    -- Add short words sorted by length (shortest first)
+    for len = 1, SHORT_THRESHOLD do
+        if lengthGroups[len] then
+            for _, word in ipairs(lengthGroups[len]) do
+                table.insert(result, word)
+            end
+        end
+    end
+    
+    -- If we have long words, shuffle them and add after short words
+    if #longWords > 0 then
+        -- Shuffle long words randomly
+        for i = #longWords, 2, -1 do
+            local j = math.random(i)
+            longWords[i], longWords[j] = longWords[j], longWords[i]
+        end
+        
+        -- Add long words (limit to reasonable amount)
+        for i = 1, math.min(30, #longWords) do
+            table.insert(result, longWords[i])
+        end
+    end
+    
+    -- Final limit to 40 total words
     if #result > 40 then
         local final = {}
         for i = 1, 40 do
