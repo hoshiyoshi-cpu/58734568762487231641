@@ -289,10 +289,10 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     end
     
     -- Limit to 40 words per category (or less)
-    local function limitTo40(arr)
-        if #arr > 40 then
+    local function limitTo150(arr)
+        if #arr > 150 then
             local limited = {}
-            for i = 1, 40 do
+            for i = 1, 150 do
                 table.insert(limited, arr[i])
             end
             return limited
@@ -305,9 +305,9 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     table.sort(otherWords, sortByLength)
     
     -- Shuffle within each tier (for randomness)
-    priorityWords = shuffle(limitTo40(priorityWords))
-    shortWords = shuffle(limitTo40(shortWords))
-    otherWords = shuffle(limitTo40(otherWords))
+    priorityWords = shuffle(limitTo150(priorityWords))
+    shortWords = shuffle(limitTo150(shortWords))
+    otherWords = shuffle(limitTo150(otherWords))
     
     -- Combine: GIVE words first, then short words, then others
     local result = {}
@@ -316,9 +316,9 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     for _, w in ipairs(otherWords) do table.insert(result, w) end
     
     -- Final limit to 40 total
-    if #result > 40 then
+    if #result > 150 then
         local final = {}
-        for i = 1, 40 do
+        for i = 1, 150 do
             table.insert(final, result[i])
         end
         return final
@@ -1835,14 +1835,14 @@ UpdateList = function(detectedText, requiredLetter)
         local exacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local MAX_RESULTS = 40
+        local MAX_RESULTS = 150
         
         local function checkWord(w)
-            if Blacklist[w] or UsedWords[w] then return end
+            if Blacklist[w] or UsedWords[w] then return false end
             
-            if not CheckSuffix(w) then return end
+            if not CheckSuffix(w) then return false end
             
-            if not ignoreLengthFilter and lengthMode > 0 and #w ~= lengthMode then return end
+            if not ignoreLengthFilter and lengthMode > 0 and #w ~= lengthMode then return false end
             
             local mLen = GetMatchLength(w, prefix)
             if mLen == #prefix then
@@ -1854,7 +1854,7 @@ UpdateList = function(detectedText, requiredLetter)
                     partials = {w}
                     return true
                 elseif mLen == maxPartialLen and mLen > 0 then
-                    if #partials < 40 then 
+                    if #partials < MAX_RESULTS then 
                         table.insert(partials, w)
                         return true
                     end
@@ -1871,13 +1871,13 @@ UpdateList = function(detectedText, requiredLetter)
                     local w = bucket[i]
                     if w:sub(1, #prefix) ~= prefix then break end
                     local added = checkWord(w)
-                    if added and #exacts >= 40 then break end
+                    if added and #exacts >= MAX_RESULTS then break end
                 end
             end
         else
             for _, w in ipairs(bucket) do
                 local added = checkWord(w)
-                if added and #exacts >= 40 then break end
+                if added and #exacts >= MAX_RESULTS then break end
             end
         end
         
@@ -1891,7 +1891,7 @@ UpdateList = function(detectedText, requiredLetter)
         if #fe > 0 then exacts = fe end
     end
 
-    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 40 then
+    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 150 then
         local alreadyIn = {}
         for _, w in ipairs(exacts) do alreadyIn[w] = true end
         local padding = {}
@@ -1907,16 +1907,16 @@ UpdateList = function(detectedText, requiredLetter)
         end
         table.sort(padding, function(a, b) return #a < #b end)
         for _, w in ipairs(padding) do
-            if #exacts >= 30 then break end
+            if #exacts >= 150 then break end
             table.insert(exacts, w)
         end
     end
 
     if #exacts > 0 then
         matches = exacts
-        if #matches > 40 then
+        if #matches > 150 then
             local trimmed = {}
-            for i = 1, 40 do
+            for i = 1, 150 do
                 table.insert(trimmed, matches[i])
             end
             matches = trimmed
@@ -1935,7 +1935,7 @@ UpdateList = function(detectedText, requiredLetter)
                         local mLen = GetMatchLength(w, requiredLetter)
                         if mLen == #requiredLetter then
                             table.insert(matches, w)
-                            if #matches >= 200 then break end
+                            if #matches >= 150 then break end
                         end
                     end
                 end
