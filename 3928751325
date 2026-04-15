@@ -1798,7 +1798,6 @@ UpdateList = function(detectedText, requiredLetter)
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
 
-    local matches = {}
     local searchPrefix = detectedText
     local isBacktracked = false
     local manualSearch = false
@@ -1831,155 +1830,143 @@ UpdateList = function(detectedText, requiredLetter)
         bucket = Words
     end
 
-    local function CollectMatches(prefix, ignoreLengthFilter)
-        local exacts = {}
-        local partials = {}
-        local maxPartialLen = 0
-        local MAX_RESULTS = 40
+    -- COLLECT VARIED MATCHES (up to 150)
+    local function CollectVariedMatches(prefix, targetCount)
+        targetCount = targetCount or 150
+        local matches = {}
+        local seenLetters = {}
         
-        local function checkWord(w)
-            if Blacklist[w] or UsedWords[w] then return end
-            
-            if not CheckSuffix(w) then return end
-            
-            if not ignoreLengthFilter and lengthMode > 0 and #w ~= lengthMode then return end
-            
-            local mLen = GetMatchLength(w, prefix)
-            if mLen == #prefix then
-                table.insert(exacts, w)
-                return true
-            elseif #exacts == 0 then
-                if mLen > maxPartialLen then
-                    maxPartialLen = mLen
-                    partials = {w}
-                    return true
-                elseif mLen == maxPartialLen and mLen > 0 then
-                    if #partials < 40 then 
-                        table.insert(partials, w)
-                        return true
+        local useBinary = not (prefix:find("#") or prefix:find("%*"))
+        
+        if useBinary and #prefix > 0 then
+            local startIndex = BinarySearchStart(bucket, prefix)
+            if startIndex ~= -1 then
+                -- First pass: one per next letter (maximum variety)
+                for i = startIndex, #bucket do
+                    local w = bucket[i]
+                    if w:sub(1, #prefix) ~= prefix then break end
+                    
+                    if not Blacklist[w] and not UsedWords[w] then
+                        if CheckSuffix(w) and (lengthMode == 0 or #w == lengthMode) then
+                            local nextLetter = w:sub(#prefix + 1, #prefix + 1) or ""
+                            
+                            if not seenLetters[nextLetter] then
+                                table.insert(matches, w)
+                                seenLetters[nextLetter] = true
+                                
+                                if #matches >= targetCount then break end
+                            end
+                        end
                     end
                 end
             end
-            return false
         end
         
-        local useBinary = not (prefix:find("#") or prefix:find("%*"))
-        if useBinary and #prefix > 0 then
+        -- Second pass: fill with more words if needed
+        if #matches < targetCount and useBinary and #prefix > 0 then
             local startIndex = BinarySearchStart(bucket, prefix)
             if startIndex ~= -1 then
                 for i = startIndex, #bucket do
                     local w = bucket[i]
                     if w:sub(1, #prefix) ~= prefix then break end
-                    local added = checkWord(w)
-                    if added and #exacts >= 40 then break end
-                end
-            end
-        else
-            for _, w in ipairs(bucket) do
-                local added = checkWord(w)
-                if added and #exacts >= 40 then break end
-            end
-        end
-        
-        return exacts, partials, maxPartialLen
-    end
-
-    local exacts, partials, pLen = CollectMatches(searchPrefix, false)
-
-    if #exacts == 0 and lengthMode > 0 then
-        local fe, _, _ = CollectMatches(searchPrefix, true)
-        if #fe > 0 then exacts = fe end
-    end
-
-    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 40 then
-        local alreadyIn = {}
-        for _, w in ipairs(exacts) do alreadyIn[w] = true end
-        local padding = {}
-        local startIndex = BinarySearchStart(bucket, searchPrefix)
-        if startIndex ~= -1 then
-            for i = startIndex, #bucket do
-                local w = bucket[i]
-                if w:sub(1, #searchPrefix) ~= searchPrefix then break end
-                if not Blacklist[w] and not UsedWords[w] and not alreadyIn[w] then
-                    table.insert(padding, w)
-                end
-            end
-        end
-        table.sort(padding, function(a, b) return #a < #b end)
-        for _, w in ipairs(padding) do
-            if #exacts >= 30 then break end
-            table.insert(exacts, w)
-        end
-    end
-
-    if #exacts > 0 then
-        matches = exacts
-        if #matches > 40 then
-            local trimmed = {}
-            for i = 1, 40 do
-                table.insert(trimmed, matches[i])
-            end
-            matches = trimmed
-        end
-    elseif pLen > 0 then
-        matches = partials
-        searchPrefix = searchPrefix:sub(1, pLen)
-        isBacktracked = true
-    elseif requiredLetter and #requiredLetter > 0 then
-        local reqChar = requiredLetter:sub(1,1):lower()
-        if searchPrefix:sub(1,1):lower() ~= reqChar then
-            local fallbackBucket = (Buckets and Buckets[reqChar]) or Words
-            if fallbackBucket then
-                for _, w in ipairs(fallbackBucket) do
+                    
                     if not Blacklist[w] and not UsedWords[w] then
-                        local mLen = GetMatchLength(w, requiredLetter)
-                        if mLen == #requiredLetter then
-                            table.insert(matches, w)
-                            if #matches >= 200 then break end
+                        if CheckSuffix(w) and (lengthMode == 0 or #w == lengthMode) then
+                            local alreadyHave = false
+                            for _, existing in ipairs(matches) do
+                                if existing == w then alreadyHave = true break end
+                            end
+                            
+                            if not alreadyHave then
+                                table.insert(matches, w)
+                                if #matches >= targetCount then break end
+                            end
                         end
                     end
                 end
             end
-            if #matches > 0 then
+        end
+        
+        return matches
+    end
+
+    -- Get all matches with variety
+    local allMatches = CollectVariedMatches(searchPrefix, 150)
+    
+    -- If no matches found and lengthMode is active, try without length filter
+    if #allMatches == 0 and lengthMode > 0 then
+        local oldLengthMode = lengthMode
+        lengthMode = 0
+        allMatches = CollectVariedMatches(searchPrefix, 150)
+        lengthMode = oldLengthMode
+    end
+
+    -- Handle no matches (backtracking)
+    if #allMatches == 0 then
+        -- Try partial match for backtracking
+        local partialMatches = {}
+        local useBinary = not (searchPrefix:find("#") or searchPrefix:find("%*"))
+        if useBinary and #searchPrefix > 0 then
+            local startIndex = BinarySearchStart(bucket, searchPrefix)
+            if startIndex ~= -1 then
+                for i = startIndex, #bucket do
+                    local w = bucket[i]
+                    if w:sub(1, #searchPrefix) ~= searchPrefix then break end
+                    if not Blacklist[w] and not UsedWords[w] then
+                        if CheckSuffix(w) and (lengthMode == 0 or #w == lengthMode) then
+                            table.insert(partialMatches, w)
+                            if #partialMatches >= 40 then break end
+                        end
+                    end
+                end
+            end
+        end
+        
+        if #partialMatches > 0 then
+            allMatches = partialMatches
+            isBacktracked = true
+        elseif requiredLetter and #requiredLetter > 0 then
+            -- Fallback to required letter
+            local fallbackBucket = (Buckets and Buckets[requiredLetter:sub(1,1):lower()]) or Words
+            for _, w in ipairs(fallbackBucket) do
+                if not Blacklist[w] and not UsedWords[w] then
+                    local mLen = GetMatchLength(w, requiredLetter)
+                    if mLen == #requiredLetter then
+                        table.insert(allMatches, w)
+                        if #allMatches >= 100 then break end
+                    end
+                end
+            end
+            if #allMatches > 0 then
                 searchPrefix = requiredLetter
                 isBacktracked = true
             end
         end
     end
 
-    if #matches > 0 then
+    -- Apply sorting based on mode
+    local finalMatches = {}
+    
+    if #allMatches > 0 then
+        -- Filter by suffix and length first
         local filtered = {}
-        local padding = {}
-        for _, w in ipairs(matches) do
+        for _, w in ipairs(allMatches) do
             if CheckSuffix(w) and (lengthMode == 0 or #w == lengthMode) then
                 table.insert(filtered, w)
-            else
-                table.insert(padding, w)
             end
         end
         
-        -- FAST STRATEGIC SORT (finds best 40)
+        if #filtered == 0 then
+            filtered = allMatches
+        end
+        
+        -- Apply sort mode
         if sortMode == "Strategic" then
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
-            
         elseif sortMode == "Shortest" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            -- First group by length
+            -- Group by length, shuffle within groups
             local lengthGroups = {}
-            for _, word in ipairs(customFiltered) do
+            for _, word in ipairs(filtered) do
                 local len = #word
                 if not lengthGroups[len] then
                     lengthGroups[len] = {}
@@ -1987,7 +1974,6 @@ UpdateList = function(detectedText, requiredLetter)
                 table.insert(lengthGroups[len], word)
             end
             
-            -- Shuffle each length group
             for len, group in pairs(lengthGroups) do
                 for i = #group, 2, -1 do
                     local j = math.random(i)
@@ -1995,9 +1981,8 @@ UpdateList = function(detectedText, requiredLetter)
                 end
             end
             
-            -- Rebuild sorted by length with shuffled groups
             local sorted = {}
-            for len = 1, 20 do  -- assuming max word length 20
+            for len = 1, 20 do
                 if lengthGroups[len] then
                     for _, word in ipairs(lengthGroups[len]) do
                         table.insert(sorted, word)
@@ -2005,76 +1990,41 @@ UpdateList = function(detectedText, requiredLetter)
                 end
             end
             
-            local limited = {}
+            filtered = {}
             for i = 1, math.min(40, #sorted) do
-                table.insert(limited, sorted[i])
+                table.insert(filtered, sorted[i])
             end
-            filtered = limited
             
         elseif sortMode == "Random" then
-            -- Filter by custom prefixes
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            table.sort(customFiltered, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return false
-            end)
-            
-            local limited = {}
-            for i = 1, math.min(40, #customFiltered) do
-                table.insert(limited, customFiltered[i])
-            end
-            
-            -- Shuffle
-            for i = #limited, 2, -1 do
+            -- Shuffle all
+            for i = #filtered, 2, -1 do
                 local j = math.random(i)
-                limited[i], limited[j] = limited[j], limited[i]
+                filtered[i], filtered[j] = filtered[j], filtered[i]
             end
-            filtered = limited
+            -- Limit to 40
+            if #filtered > 40 then
+                local limited = {}
+                for i = 1, 40 do
+                    table.insert(limited, filtered[i])
+                end
+                filtered = limited
+            end
             
         elseif sortMode == "Smart" then
-            -- NEW: Smart mode - shortest first, fallback to random
             filtered = SmartSort(filtered, searchPrefix, UsedWords)
         end
         
-        -- Padding always by length (limited to 40)
-        table.sort(padding, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return false
-        end)
-        if #padding > 40 then
-            local limitedPadding = {}
-            for i = 1, 40 do
-                table.insert(limitedPadding, padding[i])
-            end
-            padding = limitedPadding
-        end
-    
-        matches = {}
-        for _, w in ipairs(filtered) do table.insert(matches, w) end
-        for _, w in ipairs(padding) do table.insert(matches, w) end
+        finalMatches = filtered
     end
 
+    -- Display results
     local displayList = {}
-    local maxDisplay = 15
-    for i = 1, math.min(maxDisplay, #matches) do
-        table.insert(displayList, matches[i])
+    for i = 1, math.min(15, #finalMatches) do
+        table.insert(displayList, finalMatches[i])
     end
 
-    if #matches > 0 and not isBacktracked then
-        currentBestMatch = matches[1]
+    if #finalMatches > 0 and not isBacktracked then
+        currentBestMatch = finalMatches[1]
     else
         currentBestMatch = nil
     end
@@ -2087,6 +2037,7 @@ UpdateList = function(detectedText, requiredLetter)
         StatusText.TextColor3 = THEME.SubText
     end
 
+    -- Update buttons
     for i = 1, math.max(#displayList, #ButtonCache) do
         local w = displayList[i]
         local btn = ButtonCache[i]
