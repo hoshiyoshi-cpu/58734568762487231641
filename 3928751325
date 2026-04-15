@@ -327,6 +327,102 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     return result
 end
 
+-- =============================================
+-- SMART SORTER (Shortest first, fallback to random)
+-- =============================================
+
+-- Track if we have short words available for the current prefix
+local lastShortWordsAvailable = false
+local lastSmartPrefix = ""
+
+local function SmartSort(wordList, currentPrefix, usedWordsSet)
+    -- Filter by custom prefixes first (if any)
+    local customFiltered = {}
+    if Config.CustomWords and #Config.CustomWords > 0 then
+        for _, word in ipairs(wordList) do
+            for _, customPrefix in ipairs(Config.CustomWords) do
+                if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
+                    table.insert(customFiltered, word)
+                    break
+                end
+            end
+        end
+    else
+        customFiltered = wordList
+    end
+    
+    -- Separate short words (6 letters or less - good for giving opponent fewer letters)
+    -- You can adjust the "short" threshold (currently 6)
+    local SHORT_THRESHOLD = 6
+    local shortWords = {}
+    local longWords = {}
+    
+    for _, word in ipairs(customFiltered) do
+        if #word <= SHORT_THRESHOLD then
+            table.insert(shortWords, word)
+        else
+            table.insert(longWords, word)
+        end
+    end
+    
+    -- Sort short words by length (shortest first)
+    table.sort(shortWords, function(a, b)
+        if #a ~= #b then return #a < #b end
+        return a < b  -- Keep alphabetical for consistency within same length
+    end)
+    
+    -- Check if we have short words available for this prefix
+    local hasShortWords = #shortWords > 0
+    
+    -- Reset tracking when prefix changes
+    if currentPrefix ~= lastSmartPrefix then
+        lastSmartPrefix = currentPrefix
+        lastShortWordsAvailable = hasShortWords
+    else
+        -- Update available status (short words might have been used up)
+        lastShortWordsAvailable = hasShortWords
+    end
+    
+    local result = {}
+    
+    if lastShortWordsAvailable and #shortWords > 0 then
+        -- Use short words (prioritize shortest first)
+        -- Limit to 40 total from short words
+        for i = 1, math.min(40, #shortWords) do
+            table.insert(result, shortWords[i])
+        end
+    else
+        -- No short words available, fall back to random selection from ALL words
+        -- But still respect custom prefix filter
+        local randomPool = {}
+        for _, word in ipairs(customFiltered) do
+            table.insert(randomPool, word)
+        end
+        
+        -- Shuffle the random pool
+        for i = #randomPool, 2, -1 do
+            local j = math.random(i)
+            randomPool[i], randomPool[j] = randomPool[j], randomPool[i]
+        end
+        
+        -- Take first 40 random words
+        for i = 1, math.min(40, #randomPool) do
+            table.insert(result, randomPool[i])
+        end
+    end
+    
+    -- Final limit to 40
+    if #result > 40 then
+        local final = {}
+        for i = 1, 40 do
+            table.insert(final, result[i])
+        end
+        return final
+    end
+    
+    return result
+end
+
 local function LoadList(fname)
     UpdateStatus("Parsing word list...", THEME.Warning)
     if isfile(fname) then
@@ -2064,102 +2160,6 @@ UpdateList = function(detectedText, requiredLetter)
     end
 
     ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
-end
-
--- =============================================
--- SMART SORTER (Shortest first, fallback to random)
--- =============================================
-
--- Track if we have short words available for the current prefix
-local lastShortWordsAvailable = false
-local lastSmartPrefix = ""
-
-local function SmartSort(wordList, currentPrefix, usedWordsSet)
-    -- Filter by custom prefixes first (if any)
-    local customFiltered = {}
-    if Config.CustomWords and #Config.CustomWords > 0 then
-        for _, word in ipairs(wordList) do
-            for _, customPrefix in ipairs(Config.CustomWords) do
-                if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                    table.insert(customFiltered, word)
-                    break
-                end
-            end
-        end
-    else
-        customFiltered = wordList
-    end
-    
-    -- Separate short words (6 letters or less - good for giving opponent fewer letters)
-    -- You can adjust the "short" threshold (currently 6)
-    local SHORT_THRESHOLD = 6
-    local shortWords = {}
-    local longWords = {}
-    
-    for _, word in ipairs(customFiltered) do
-        if #word <= SHORT_THRESHOLD then
-            table.insert(shortWords, word)
-        else
-            table.insert(longWords, word)
-        end
-    end
-    
-    -- Sort short words by length (shortest first)
-    table.sort(shortWords, function(a, b)
-        if #a ~= #b then return #a < #b end
-        return a < b  -- Keep alphabetical for consistency within same length
-    end)
-    
-    -- Check if we have short words available for this prefix
-    local hasShortWords = #shortWords > 0
-    
-    -- Reset tracking when prefix changes
-    if currentPrefix ~= lastSmartPrefix then
-        lastSmartPrefix = currentPrefix
-        lastShortWordsAvailable = hasShortWords
-    else
-        -- Update available status (short words might have been used up)
-        lastShortWordsAvailable = hasShortWords
-    end
-    
-    local result = {}
-    
-    if lastShortWordsAvailable and #shortWords > 0 then
-        -- Use short words (prioritize shortest first)
-        -- Limit to 40 total from short words
-        for i = 1, math.min(40, #shortWords) do
-            table.insert(result, shortWords[i])
-        end
-    else
-        -- No short words available, fall back to random selection from ALL words
-        -- But still respect custom prefix filter
-        local randomPool = {}
-        for _, word in ipairs(customFiltered) do
-            table.insert(randomPool, word)
-        end
-        
-        -- Shuffle the random pool
-        for i = #randomPool, 2, -1 do
-            local j = math.random(i)
-            randomPool[i], randomPool[j] = randomPool[j], randomPool[i]
-        end
-        
-        -- Take first 40 random words
-        for i = 1, math.min(40, #randomPool) do
-            table.insert(result, randomPool[i])
-        end
-    end
-    
-    -- Final limit to 40
-    if #result > 40 then
-        local final = {}
-        for i = 1, 40 do
-            table.insert(final, result[i])
-        end
-        return final
-    end
-    
-    return result
 end
 
 -- =============================================
