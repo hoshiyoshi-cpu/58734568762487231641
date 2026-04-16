@@ -1049,6 +1049,8 @@ ResetUsedBtn.MouseButton1Click:Connect(function()
     StatusText.TextColor3 = THEME.Success
 end)
 
+-- FIXED BUTTON LAYOUT: Row 1: Word Browser (left), View Used Words (right)
+-- Row 2: Custom Words (left), Server Browser (right)
 local WordBrowserBtn = Instance.new("TextButton", TogglesFrame)
 WordBrowserBtn.Text = "Word Browser"
 WordBrowserBtn.Font = Enum.Font.GothamMedium
@@ -1066,7 +1068,7 @@ ViewUsedBtn.TextSize = 11
 ViewUsedBtn.TextColor3 = THEME.SubText
 ViewUsedBtn.BackgroundColor3 = THEME.Background
 ViewUsedBtn.Size = UDim2.new(0, 130, 0, 24)
-ViewUsedBtn.Position = UDim2.new(0, 15, 0, 65)
+ViewUsedBtn.Position = UDim2.new(0, 150, 0, 35)  -- Right side on row 1
 Instance.new("UICorner", ViewUsedBtn).CornerRadius = UDim.new(0, 4)
 
 local ManageWordsBtn = Instance.new("TextButton", TogglesFrame)
@@ -1076,7 +1078,7 @@ ManageWordsBtn.TextSize = 11
 ManageWordsBtn.TextColor3 = THEME.Accent
 ManageWordsBtn.BackgroundColor3 = THEME.Background
 ManageWordsBtn.Size = UDim2.new(0, 130, 0, 24)
-ManageWordsBtn.Position = UDim2.new(0, 150, 0, 35)
+ManageWordsBtn.Position = UDim2.new(0, 15, 0, 65)  -- Left side on row 2
 Instance.new("UICorner", ManageWordsBtn).CornerRadius = UDim.new(0, 4)
 
 local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
@@ -1086,7 +1088,7 @@ ServerBrowserBtn.TextSize = 11
 ServerBrowserBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
 ServerBrowserBtn.BackgroundColor3 = THEME.Background
 ServerBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
-ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 65)
+ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 65)  -- Right side on row 2
 Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
 -- =============================================
@@ -1106,21 +1108,6 @@ local UWStroke = Instance.new("UIStroke", UsedWordsFrame)
 UWStroke.Color = THEME.Accent
 UWStroke.Transparency = 0.5
 UWStroke.Thickness = 2
-
--- Add a heartbeat connection to refresh used words in real-time when open
-local usedWordsHeartbeat
-usedWordsHeartbeat = RunService.Heartbeat:Connect(function()
-    if UsedWordsFrame and UsedWordsFrame.Visible then
-        -- Refresh every 0.5 seconds when open
-        if not lastUsedWordsRefresh or tick() - lastUsedWordsRefresh > 0.5 then
-            lastUsedWordsRefresh = tick()
-            RefreshUsedWords()
-        end
-    end
-end)
-
--- Store the last refresh time
-local lastUsedWordsRefresh = 0
 
 local UWHeader = Instance.new("TextLabel", UsedWordsFrame)
 UWHeader.Text = "Used Words"
@@ -1351,6 +1338,17 @@ ViewUsedBtn.MouseButton1Click:Connect(function()
     if UsedWordsFrame.Visible then 
         lastUsedWordsRefresh = 0  -- Force immediate refresh
         RefreshUsedWords() 
+    end
+end)
+
+-- FIXED: Heartbeat connection moved to AFTER RefreshUsedWords is defined
+local lastUsedWordsRefresh = 0
+local usedWordsHeartbeat = RunService.Heartbeat:Connect(function()
+    if UsedWordsFrame and UsedWordsFrame.Visible then
+        if tick() - lastUsedWordsRefresh > 0.5 then
+            lastUsedWordsRefresh = tick()
+            RefreshUsedWords()
+        end
     end
 end)
 
