@@ -1059,16 +1059,6 @@ WordBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
 WordBrowserBtn.Position = UDim2.new(0, 15, 0, 35)
 Instance.new("UICorner", WordBrowserBtn).CornerRadius = UDim.new(0, 4)
 
-local ManageWordsBtn = Instance.new("TextButton", TogglesFrame)
-ManageWordsBtn.Text = "Custom Words"
-ManageWordsBtn.Font = Enum.Font.GothamMedium
-ManageWordsBtn.TextSize = 11
-ManageWordsBtn.TextColor3 = THEME.Accent
-ManageWordsBtn.BackgroundColor3 = THEME.Background
-ManageWordsBtn.Size = UDim2.new(0, 130, 0, 24)
-ManageWordsBtn.Position = UDim2.new(0, 150, 0, 35)
-Instance.new("UICorner", ManageWordsBtn).CornerRadius = UDim.new(0, 4)
-
 local ViewUsedBtn = Instance.new("TextButton", TogglesFrame)
 ViewUsedBtn.Text = "View Used Words"
 ViewUsedBtn.Font = Enum.Font.GothamMedium
@@ -1078,6 +1068,16 @@ ViewUsedBtn.BackgroundColor3 = THEME.Background
 ViewUsedBtn.Size = UDim2.new(0, 130, 0, 24)
 ViewUsedBtn.Position = UDim2.new(0, 15, 0, 65)
 Instance.new("UICorner", ViewUsedBtn).CornerRadius = UDim.new(0, 4)
+
+local ManageWordsBtn = Instance.new("TextButton", TogglesFrame)
+ManageWordsBtn.Text = "Custom Words"
+ManageWordsBtn.Font = Enum.Font.GothamMedium
+ManageWordsBtn.TextSize = 11
+ManageWordsBtn.TextColor3 = THEME.Accent
+ManageWordsBtn.BackgroundColor3 = THEME.Background
+ManageWordsBtn.Size = UDim2.new(0, 130, 0, 24)
+ManageWordsBtn.Position = UDim2.new(0, 150, 0, 35)
+Instance.new("UICorner", ManageWordsBtn).CornerRadius = UDim.new(0, 4)
 
 local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
 ServerBrowserBtn.Text = "Server Browser"
@@ -1106,6 +1106,21 @@ local UWStroke = Instance.new("UIStroke", UsedWordsFrame)
 UWStroke.Color = THEME.Accent
 UWStroke.Transparency = 0.5
 UWStroke.Thickness = 2
+
+-- Add a heartbeat connection to refresh used words in real-time when open
+local usedWordsHeartbeat
+usedWordsHeartbeat = RunService.Heartbeat:Connect(function()
+    if UsedWordsFrame and UsedWordsFrame.Visible then
+        -- Refresh every 0.5 seconds when open
+        if not lastUsedWordsRefresh or tick() - lastUsedWordsRefresh > 0.5 then
+            lastUsedWordsRefresh = tick()
+            RefreshUsedWords()
+        end
+    end
+end)
+
+-- Store the last refresh time
+local lastUsedWordsRefresh = 0
 
 local UWHeader = Instance.new("TextLabel", UsedWordsFrame)
 UWHeader.Text = "Used Words"
@@ -1182,19 +1197,49 @@ UWLayout.Padding = UDim.new(0, 2)
 UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local RefreshUsedWords
+local lastRefreshHash = ""  -- Track last refresh to avoid spam
+
 RefreshUsedWords = function()
+    -- Only refresh if frame is visible
+    if not UsedWordsFrame.Visible then return end
+    
+    -- Calculate hash of current used words to avoid unnecessary refreshes
+    local hash = ""
+    for w, t in pairs(UsedWords) do
+        hash = hash .. w .. tostring(t)
+    end
+    for w, _ in pairs(Blacklist) do
+        hash = hash .. w .. "bl"
+    end
+    hash = hash .. (UWSearchBox.Text or "")
+    
+    if hash == lastRefreshHash then return end
+    lastRefreshHash = hash
+    
+    -- Clear existing children
     for _, c in ipairs(UWList:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
+    
     local query = UWSearchBox.Text:lower():gsub("[%s%c]+", "")
     local usedList = {}
     local blacklistedList = {}
-    for w, t in pairs(UsedWords) do table.insert(usedList, {word = w, time = t}) end
+    
+    for w, t in pairs(UsedWords) do 
+        table.insert(usedList, {word = w, time = t}) 
+    end
     table.sort(usedList, function(a, b) return a.time > b.time end)
-    for w, _ in pairs(Blacklist) do table.insert(blacklistedList, w) end
+    
+    for w, _ in pairs(Blacklist) do 
+        table.insert(blacklistedList, w) 
+    end
+    
     UWCountLabel.Text = #usedList .. " used, " .. #blacklistedList .. " blacklisted"
+    
     local i = 0
     local scrollTarget = nil
+    
+    -- Show used words
     for _, entry in ipairs(usedList) do
         local w = entry.word
         i = i + 1
@@ -1204,6 +1249,7 @@ RefreshUsedWords = function()
         row.BorderSizePixel = 0
         row.LayoutOrder = i
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+        
         local lbl = Instance.new("TextLabel", row)
         lbl.Text = w
         lbl.Font = Enum.Font.Gotham
@@ -1213,11 +1259,30 @@ RefreshUsedWords = function()
         lbl.Position = UDim2.new(0, 5, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.TextXAlignment = Enum.TextXAlignment.Left
+        
+        -- Add delete button for used words
+        local del = Instance.new("TextButton", row)
+        del.Text = "X"
+        del.Font = Enum.Font.GothamBold
+        del.TextSize = 11
+        del.TextColor3 = Color3.fromRGB(255, 80, 80)
+        del.Size = UDim2.new(0, 22, 1, 0)
+        del.Position = UDim2.new(1, -22, 0, 0)
+        del.BackgroundTransparency = 1
+        del.MouseButton1Click:Connect(function()
+            UsedWords[w] = nil
+            ShowToast("Removed from used: " .. w, "warning")
+            RefreshUsedWords()
+            forceUpdateList = true
+        end)
+        
         if query ~= "" and w:find(query, 1, true) then
             row.BackgroundColor3 = Color3.fromRGB(40, 70, 40)
             if not scrollTarget then scrollTarget = i end
         end
     end
+    
+    -- Show blacklisted words
     for _, w in ipairs(blacklistedList) do
         i = i + 1
         local row = Instance.new("Frame", UWList)
@@ -1226,6 +1291,7 @@ RefreshUsedWords = function()
         row.BorderSizePixel = 0
         row.LayoutOrder = i
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+        
         local lbl = Instance.new("TextLabel", row)
         lbl.Text = w .. " (blacklisted)"
         lbl.Font = Enum.Font.Gotham
@@ -1235,23 +1301,57 @@ RefreshUsedWords = function()
         lbl.Position = UDim2.new(0, 5, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.TextXAlignment = Enum.TextXAlignment.Left
+        
         if query ~= "" and w:find(query, 1, true) then
             row.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
             if not scrollTarget then scrollTarget = i end
         end
     end
+    
     UWList.CanvasSize = UDim2.new(0, 0, 0, UWLayout.AbsoluteContentSize.Y)
     if scrollTarget then
         UWList.CanvasPosition = Vector2.new(0, math.max(0, (scrollTarget - 1) * 24 - 50))
     end
 end
 
+-- Add a connection to auto-refresh when UsedWords changes
+local usedWordsChanged = false
+local function ScheduleUsedWordsRefresh()
+    if UsedWordsFrame.Visible and not usedWordsChanged then
+        usedWordsChanged = true
+        task.defer(function()
+            task.wait(0.1)  -- Debounce
+            if UsedWordsFrame.Visible then
+                RefreshUsedWords()
+            end
+            usedWordsChanged = false
+        end)
+    end
+end
+
+-- Override the UsedWords table to detect changes
+local originalUsedWords = UsedWords
+UsedWords = setmetatable({}, {
+    __index = originalUsedWords,
+    __newindex = function(t, k, v)
+        originalUsedWords[k] = v
+        ScheduleUsedWordsRefresh()
+        forceUpdateList = true
+    end,
+    __pairs = function(t)
+        return pairs(originalUsedWords)
+    end
+})
+
 UWSearchBox:GetPropertyChangedSignal("Text"):Connect(RefreshUsedWords)
 ViewUsedBtn.MouseButton1Click:Connect(function()
     UsedWordsFrame.Visible = not UsedWordsFrame.Visible
     UsedWordsFrame.Parent = nil
     UsedWordsFrame.Parent = ScreenGui
-    if UsedWordsFrame.Visible then RefreshUsedWords() end
+    if UsedWordsFrame.Visible then 
+        lastUsedWordsRefresh = 0  -- Force immediate refresh
+        RefreshUsedWords() 
+    end
 end)
 
 -- =============================================
