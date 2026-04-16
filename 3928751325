@@ -2169,8 +2169,84 @@ UpdateList = function(detectedText, requiredLetter)
             filtered = limited
             
         elseif sortMode == "Smart" then
-            -- NEW: Smart mode - shortest first, fallback to random
-            filtered = SmartSort(filtered, searchPrefix, UsedWords)
+            -- FIXED SMART MODE: Shuffle first, then sort by length while preserving random order within same length
+            
+            -- FIRST: Filter by custom prefixes
+            local customFiltered = {}
+            if Config.CustomWords and #Config.CustomWords > 0 then
+                for _, word in ipairs(filtered) do
+                    for _, customPrefix in ipairs(Config.CustomWords) do
+                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
+                            table.insert(customFiltered, word)
+                            break
+                        end
+                    end
+                end
+            else
+                customFiltered = filtered
+            end
+            
+            -- SHUFFLE THE ENTIRE LIST FIRST (this randomizes the order)
+            for i = #customFiltered, 2, -1 do
+                local j = math.random(i)
+                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
+            end
+            
+            -- Separate short words (6 letters or less) from long words
+            local SHORT_THRESHOLD = 6
+            local shortWords = {}
+            local longWords = {}
+            
+            for _, word in ipairs(customFiltered) do
+                if #word <= SHORT_THRESHOLD then
+                    table.insert(shortWords, word)
+                else
+                    table.insert(longWords, word)
+                end
+            end
+            
+            local smartResult = {}
+            
+            -- Group short words by length (preserving the shuffled order within each length)
+            local lengthGroups = {}
+            for _, word in ipairs(shortWords) do
+                local len = #word
+                if not lengthGroups[len] then
+                    lengthGroups[len] = {}
+                end
+                table.insert(lengthGroups[len], word)
+            end
+            
+            -- Add short words sorted by length (shortest first), preserving shuffled order within same length
+            for len = 1, SHORT_THRESHOLD do
+                if lengthGroups[len] then
+                    for _, word in ipairs(lengthGroups[len]) do
+                        table.insert(smartResult, word)
+                    end
+                end
+            end
+            
+            -- Shuffle long words and add them
+            if #longWords > 0 then
+                for i = #longWords, 2, -1 do
+                    local j = math.random(i)
+                    longWords[i], longWords[j] = longWords[j], longWords[i]
+                end
+                for i = 1, math.min(30, #longWords) do
+                    table.insert(smartResult, longWords[i])
+                end
+            end
+            
+            -- Final limit to 40 total words
+            if #smartResult > 40 then
+                local final = {}
+                for i = 1, 40 do
+                    table.insert(final, smartResult[i])
+                end
+                filtered = final
+            else
+                filtered = smartResult
+            end
         end
         
         -- Padding always by length (limited to 40)
