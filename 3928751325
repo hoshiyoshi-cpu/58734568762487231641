@@ -453,6 +453,81 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
     return result
 end
 
+-- =============================================
+-- 1BY1 MODE - Words that end the game (no continuations)
+-- =============================================
+
+local function OneByOneSort(wordList, currentPrefix, usedWordsSet)
+    local gameEnders = {}      -- Words with NO possible continuations
+    local hasContinuations = {} -- Words that CAN be continued
+    local otherWords = {}       -- Everything else
+    
+    for _, word in ipairs(wordList) do
+        local wl = word:lower()
+        
+        -- Check if this word can be continued (other words start with it)
+        local canContinue = false
+        local bucket = Buckets[wl:sub(1,1)]
+        
+        if bucket then
+            -- Look for ANY word that starts with this exact word (excluding itself)
+            for i = 1, #bucket do
+                local checkWord = bucket[i]
+                if checkWord ~= wl and checkWord:sub(1, #wl) == wl then
+                    if not usedWordsSet[checkWord] then
+                        canContinue = true
+                        break
+                    end
+                end
+            end
+        end
+        
+        if not canContinue then
+            -- This word ends the game! Priority 1
+            table.insert(gameEnders, word)
+        else
+            -- This word can be continued
+            table.insert(hasContinuations, word)
+        end
+    end
+    
+    -- Shuffle function for randomness within tiers
+    local function shuffle(t)
+        for i = #t, 2, -1 do
+            local j = math.random(i)
+            t[i], t[j] = t[j], t[i]
+        end
+        return t
+    end
+    
+    -- Sort game enders by length (shortest first - end the game faster)
+    table.sort(gameEnders, function(a, b)
+        if #a ~= #b then return #a < #b end
+        return false
+    end)
+    
+    -- Sort continuations by length (shortest first)
+    table.sort(hasContinuations, function(a, b)
+        if #a ~= #b then return #a < #b end
+        return false
+    end)
+    
+    -- Shuffle within tiers
+    gameEnders = shuffle(gameEnders)
+    hasContinuations = shuffle(hasContinuations)
+    
+    -- Combine: Game enders FIRST, then words that can be continued
+    local result = {}
+    for i = 1, math.min(40, #gameEnders) do
+        table.insert(result, gameEnders[i])
+    end
+    for i = 1, math.min(40 - #result, #hasContinuations) do
+        table.insert(result, hasContinuations[i])
+    end
+    
+    return result
+end
+
 local function LoadList(fname)
     UpdateStatus("Parsing word list...", THEME.Warning)
     if isfile(fname) then
@@ -1021,6 +1096,8 @@ local SortBtn = CreateToggle("Sort: "..sortMode, UDim2.new(0, 15, 0, 5), UDim2.n
         sortMode = "Smart"
     elseif sortMode == "Smart" then
         sortMode = "Strategic"
+    elseif sortMode == "Strategic" then
+        sortMode = "1BY1"
     else
         sortMode = "Shortest"
     end
@@ -2082,7 +2159,11 @@ UpdateList = function(detectedText, requiredLetter)
             -- NEW: Smart mode - shortest first, fallback to random
             filtered = SmartSort(filtered, searchPrefix, UsedWords)
         end
-        
+
+        elseif sortMode == "1BY1" then
+            filtered = OneByOneSort(filtered, searchPrefix, UsedWords)
+        end
+
         -- Padding always by length (limited to 40)
         table.sort(padding, function(a, b)
             if #a ~= #b then return #a < #b end
