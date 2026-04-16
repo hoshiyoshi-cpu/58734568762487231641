@@ -163,25 +163,28 @@ end
 -- =============================================
 
 -- Pre-compute which words are GIVE words for fast lookup
+-- Replace GiveWordsLookup with a Set using table index (already done but ensure it's fast)
 local GiveWordsLookup = {}
 local function RefreshGiveWordsLookup()
-    GiveWordsLookup = {}
+    local lookup = {}
     if Config.GiveWords then
-        for _, gw in ipairs(Config.GiveWords) do
-            GiveWordsLookup[gw] = true
+        for i = 1, #Config.GiveWords do
+            lookup[Config.GiveWords[i]] = true
         end
     end
+    GiveWordsLookup = lookup  -- Direct assignment, no table.clear needed
 end
 
--- Pre-compute trap prefixes for fast lookup
+-- Same for TrapPrefixesLookup
 local TrapPrefixesLookup = {}
 local function RefreshTrapLookup()
-    TrapPrefixesLookup = {}
+    local lookup = {}
     if Config.TrapPrefixes then
-        for _, tp in ipairs(Config.TrapPrefixes) do
-            TrapPrefixesLookup[tp] = true
+        for i = 1, #Config.TrapPrefixes do
+            lookup[Config.TrapPrefixes[i]] = true
         end
     end
+    TrapPrefixesLookup = lookup
 end
 
 -- Initialize lookups
@@ -255,73 +258,104 @@ local SeenWords = {}
 -- FAST STRATEGIC SORTER
 -- =============================================
 
+-- OPTIMIZED: Pre-compute word lengths and cache lookups
 local function StrategicSort(wordList, currentPrefix, usedWordsSet)
-    local priorityWords = {} -- GIVE words
-    local shortWords = {}    -- Short words (5 letters or less)
-    local otherWords = {}    -- Everything else
+    -- Use local references for faster access
+    local giveWordsLookup = GiveWordsLookup
+    local SHORT_THRESHOLD = 5
+    local MAX_WORDS = 40
     
-    for _, word in ipairs(wordList) do
+    -- Pre-allocate arrays with estimated capacity
+    local priorityWords = {}
+    local shortWords = {}
+    local otherWords = {}
+    
+    -- Pre-compute lengths once per word
+    local wordData = {}
+    for i = 1, #wordList do
+        local word = wordList[i]
         local wl = word:lower()
-        
-        -- Check if this is a GIVE word (highest priority)
-        if GiveWordsLookup[wl] then
-            table.insert(priorityWords, word)
-        elseif #wl <= 5 then
-            table.insert(shortWords, word)
+        wordData[i] = {
+            word = word,
+            wl = wl,
+            len = #wl,
+            isGive = giveWordsLookup[wl] or false
+        }
+    end
+    
+    -- Single pass categorization
+    for i = 1, #wordData do
+        local data = wordData[i]
+        if data.isGive then
+            priorityWords[#priorityWords + 1] = data
+        elseif data.len <= SHORT_THRESHOLD then
+            shortWords[#shortWords + 1] = data
         else
-            table.insert(otherWords, word)
+            otherWords[#otherWords + 1] = data
         end
     end
     
-    -- Shuffle function for randomness within tiers
+    -- Fisher-Yates shuffle with local function for speed
     local function shuffle(t)
-        for i = #t, 2, -1 do
+        local n = #t
+        for i = n, 2, -1 do
             local j = math.random(i)
             t[i], t[j] = t[j], t[i]
         end
         return t
     end
     
-    -- Sort each category by length (shortest first) but KEEP only 40 max
+    -- Sort by length using pre-computed lengths
     local function sortByLength(a, b)
-        if #a ~= #b then return #a < #b end
-        return false  -- Don't sort alphabetically, keep as is
+        return a.len < b.len
     end
     
-    -- Limit to 40 words per category (or less)
+    -- Limit to max words while preserving order
     local function limitTo40(arr)
-        if #arr > 40 then
+        local n = #arr
+        if n > MAX_WORDS then
             local limited = {}
-            for i = 1, 40 do
-                table.insert(limited, arr[i])
+            for i = 1, MAX_WORDS do
+                limited[i] = arr[i]
             end
             return limited
         end
         return arr
     end
     
+    -- Sort each category by length
     table.sort(priorityWords, sortByLength)
     table.sort(shortWords, sortByLength)
     table.sort(otherWords, sortByLength)
     
-    -- Shuffle within each tier (for randomness)
+    -- Shuffle within tiers and limit
     priorityWords = shuffle(limitTo40(priorityWords))
     shortWords = shuffle(limitTo40(shortWords))
     otherWords = shuffle(limitTo40(otherWords))
     
-    -- Combine: GIVE words first, then short words, then others
+    -- Build result by extracting .word from data objects
+    local totalCount = #priorityWords + #shortWords + #otherWords
+    local finalCount = totalCount > MAX_WORDS and MAX_WORDS or totalCount
     local result = {}
-    for _, w in ipairs(priorityWords) do table.insert(result, w) end
-    for _, w in ipairs(shortWords) do table.insert(result, w) end
-    for _, w in ipairs(otherWords) do table.insert(result, w) end
+    local idx = 1
     
-    -- Final limit to 40 total
-    if #result > 40 then
-        local final = {}
-        for i = 1, 40 do
-            table.insert(final, result[i])
-        end
-        return final
+    -- Combine categories
+    for i = 1, #priorityWords do
+        result[idx] = priorityWords[i].word
+        idx = idx + 1
+        if idx > finalCount then break end
+    end
+    
+    for i = 1, #shortWords do
+        result[idx] = shortWords[i].word
+        idx = idx + 1
+        if idx > finalCount then break end
+    end
+    
+    for i = 1, #otherWords do
+        result[idx] = otherWords[i].word
+        idx = idx + 1
+        if idx > finalCount then break end
     end
     
     return result
