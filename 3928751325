@@ -2158,7 +2158,6 @@ UpdateList = function(detectedText, requiredLetter)
         elseif sortMode == "Smart" then
             -- NEW: Smart mode - shortest first, fallback to random
             filtered = SmartSort(filtered, searchPrefix, UsedWords)
-        end
 
         elseif sortMode == "1BY1" then
             filtered = OneByOneSort(filtered, searchPrefix, UsedWords)
