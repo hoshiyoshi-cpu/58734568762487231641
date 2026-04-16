@@ -2109,7 +2109,7 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            -- First group by length
+            -- Group by length (preserves original order within each group)
             local lengthGroups = {}
             for _, word in ipairs(customFiltered) do
                 local len = #word
@@ -2119,15 +2119,7 @@ UpdateList = function(detectedText, requiredLetter)
                 table.insert(lengthGroups[len], word)
             end
             
-            -- Shuffle each length group
-            for len, group in pairs(lengthGroups) do
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-            end
-            
-            -- Rebuild sorted by length with shuffled groups
+            -- Rebuild sorted by length (shortest to longest, keeping original order within each length)
             local sorted = {}
             for len = 1, 20 do  -- assuming max word length 20
                 if lengthGroups[len] then
