@@ -258,11 +258,10 @@ local SeenWords = {}
 -- FAST STRATEGIC SORTER
 -- =============================================
 
--- OPTIMIZED: Pre-compute word lengths and cache lookups
+-- OPTIMIZED: Strategic mode with length priority (shortest first, then strategic grouping)
 local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     -- Use local references for faster access
     local giveWordsLookup = GiveWordsLookup
-    local SHORT_THRESHOLD = 5
     local MAX_WORDS = 40
     
     -- Pre-allocate arrays with estimated capacity
@@ -288,34 +287,30 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
         local data = wordData[i]
         if data.isGive then
             priorityWords[#priorityWords + 1] = data
-        elseif data.len <= SHORT_THRESHOLD then
-            shortWords[#shortWords + 1] = data
         else
-            otherWords[#otherWords + 1] = data
+            -- NEW: Categorize by length (5 letters or less = short)
+            if data.len <= 5 then
+                shortWords[#shortWords + 1] = data
+            else
+                otherWords[#otherWords + 1] = data
+            end
         end
     end
     
-    -- Fisher-Yates shuffle with local function for speed
-    local function shuffle(t)
-        local n = #t
-        for i = n, 2, -1 do
-            local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
-        end
-        return t
-    end
-    
-    -- Sort by length using pre-computed lengths
+    -- Sort each category by LENGTH (shortest first)
     local function sortByLength(a, b)
         return a.len < b.len
     end
     
-    -- Limit to max words while preserving order
-    local function limitTo40(arr)
-        local n = #arr
-        if n > MAX_WORDS then
+    table.sort(priorityWords, sortByLength)
+    table.sort(shortWords, sortByLength)
+    table.sort(otherWords, sortByLength)
+    
+    -- Limit each category while preserving length order
+    local function limitToMax(arr, maxCount)
+        if #arr > maxCount then
             local limited = {}
-            for i = 1, MAX_WORDS do
+            for i = 1, maxCount do
                 limited[i] = arr[i]
             end
             return limited
@@ -323,39 +318,32 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
         return arr
     end
     
-    -- Sort each category by length
-    table.sort(priorityWords, sortByLength)
-    table.sort(shortWords, sortByLength)
-    table.sort(otherWords, sortByLength)
+    -- Priority words get more slots (strategic advantage)
+    local priorityLimit = math.min(15, #priorityWords)
+    local shortLimit = math.min(15, #shortWords)
+    local otherLimit = MAX_WORDS - priorityLimit - shortLimit
+    if otherLimit < 0 then otherLimit = 0 end
     
-    -- Shuffle within tiers and limit
-    priorityWords = shuffle(limitTo40(priorityWords))
-    shortWords = shuffle(limitTo40(shortWords))
-    otherWords = shuffle(limitTo40(otherWords))
+    priorityWords = limitToMax(priorityWords, priorityLimit)
+    shortWords = limitToMax(shortWords, shortLimit)
+    otherWords = limitToMax(otherWords, otherLimit)
     
-    -- Build result by extracting .word from data objects
-    local totalCount = #priorityWords + #shortWords + #otherWords
-    local finalCount = totalCount > MAX_WORDS and MAX_WORDS or totalCount
+    -- Build result by extracting .word from data objects (length-sorted already)
     local result = {}
-    local idx = 1
     
-    -- Combine categories
+    -- Add priority words first (shortest among these)
     for i = 1, #priorityWords do
-        result[idx] = priorityWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+        table.insert(result, priorityWords[i].word)
     end
     
+    -- Add short words next (shortest first)
     for i = 1, #shortWords do
-        result[idx] = shortWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+        table.insert(result, shortWords[i].word)
     end
     
+    -- Add other words last (shortest first)
     for i = 1, #otherWords do
-        result[idx] = otherWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+        table.insert(result, otherWords[i].word)
     end
     
     return result
@@ -2151,20 +2139,38 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            table.sort(customFiltered, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return false
-            end)
-            
-            local limited = {}
-            for i = 1, math.min(40, #customFiltered) do
-                table.insert(limited, customFiltered[i])
+            -- Group by length
+            local lengthGroups = {}
+            for _, word in ipairs(customFiltered) do
+                local len = #word
+                if not lengthGroups[len] then
+                    lengthGroups[len] = {}
+                end
+                table.insert(lengthGroups[len], word)
             end
             
-            -- Shuffle
-            for i = #limited, 2, -1 do
-                local j = math.random(i)
-                limited[i], limited[j] = limited[j], limited[i]
+            -- Shuffle within each length group (random order but grouped by length)
+            for len, group in pairs(lengthGroups) do
+                for i = #group, 2, -1 do
+                    local j = math.random(i)
+                    group[i], group[j] = group[j], group[i]
+                end
+            end
+            
+            -- Rebuild sorted by length (shortest to longest), with random order within each length
+            local sorted = {}
+            for len = 1, 20 do  -- assuming max word length 20
+                if lengthGroups[len] then
+                    for _, word in ipairs(lengthGroups[len]) do
+                        table.insert(sorted, word)
+                    end
+                end
+            end
+            
+            -- Limit to 40 words
+            local limited = {}
+            for i = 1, math.min(40, #sorted) do
+                table.insert(limited, sorted[i])
             end
             filtered = limited
             
