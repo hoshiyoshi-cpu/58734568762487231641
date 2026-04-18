@@ -1992,74 +1992,16 @@ UpdateList = function(detectedText, requiredLetter)
             return false
         end
         
-        -- Get the starting bucket
-        local searchBucket = bucket
-        local startIndex = 1
-        
-        -- If prefix has a first character, try to narrow down the bucket first
-        if #prefix > 0 then
-            local firstChar = prefix:sub(1, 1)
-            -- Use cached bucket for first character if available
-            if Buckets and Buckets[firstChar] then
-                searchBucket = Buckets[firstChar]
-            end
-            
-            -- Try to find starting position using binary search (fast)
-            local lo, hi = 1, #searchBucket
-            while lo <= hi do
-                local mid = math.floor((lo + hi) / 2)
-                local word = searchBucket[mid]
-                if word < prefix then
-                    lo = mid + 1
-                else
-                    hi = mid - 1
-                end
-            end
-            startIndex = lo
-        end
-        
-        -- Scan from startIndex with a reasonable limit (stops after finding enough words)
-        local checked = 0
-        local MAX_CHECK = 500  -- Limit how many words we check to prevent lag
-        
-        for i = startIndex, #searchBucket do
-            local w = searchBucket[i]
-            checked = checked + 1
-            
-            -- Early exit conditions
-            if checked > MAX_CHECK and #exacts >= 10 then
-                break  -- Found enough words, stop scanning
-            end
-            
-            -- Quick prefix check before expensive operations
-            if #prefix > 0 then
-                if w:sub(1, #prefix) < prefix then
-                    -- Still before our prefix, continue
-                elseif w:sub(1, #prefix) > prefix then
-                    -- Past our prefix, we can stop
-                    if #exacts > 0 or #partials > 0 then
-                        break
-                    end
-                end
-            end
-            
-            if #prefix == 0 or w:sub(1, #prefix) == prefix then
+        -- Use linear search for reliability (fixes the "mae" and "sa" issue)
+        -- Binary search was skipping words due to sorting issues
+        for _, w in ipairs(bucket) do
+            if w:sub(1, #prefix) == prefix or (#prefix > 0 and w:sub(1, 1) == prefix:sub(1, 1)) then
                 local added = checkWord(w)
-                if added and #exacts >= MAX_RESULTS then 
-                    break
-                end
+                if added and #exacts >= MAX_RESULTS then break end
             end
-        end
-        
-        -- If we didn't find enough matches, do a more thorough scan (but only if needed)
-        if #exacts == 0 and #partials == 0 and MAX_CHECK < #searchBucket then
-            -- Fallback: scan more words but with caching
-            for i = 1, math.min(#searchBucket, 1000) do
-                local w = searchBucket[i]
-                if #prefix == 0 or w:sub(1, #prefix) == prefix then
-                    local added = checkWord(w)
-                    if added and #exacts >= MAX_RESULTS then break end
-                end
+            -- Early exit if we've passed where words could be
+            if #prefix > 0 and w:sub(1, 1) > prefix:sub(1, 1) then
+                break
             end
         end
         
