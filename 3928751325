@@ -475,13 +475,31 @@ LoadList(fileName)
 
 if LoadingGui then LoadingGui:Destroy() end
 
+-- Keep original scrambled order for display
+local OriginalWords = {}
+for i, w in ipairs(Words) do
+    OriginalWords[i] = w
+end
+
+-- Create sorted version for searching (Word Browser needs this)
+local SortedWords = {}
+for i, w in ipairs(Words) do
+    SortedWords[i] = w
+end
+table.sort(SortedWords)
+
+-- Rebuild buckets with sorted words for searching
 Buckets = {}
-for _, w in ipairs(Words) do
+for _, w in ipairs(SortedWords) do
     local c = w:sub(1,1) or ""
     if c == "" then c = "#" end
     Buckets[c] = Buckets[c] or {}
     table.insert(Buckets[c], w)
 end
+
+-- Keep OriginalWords for display when not using Word Browser
+local DisplayWords = OriginalWords  -- scrambled order
+local SearchWords = SortedWords      -- alphabetical order for Word Browser
 
 if Config.CustomWords then
     for _, w in ipairs(Config.CustomWords) do
@@ -1932,6 +1950,22 @@ UpdateList = function(detectedText, requiredLetter)
     local isBacktracked = false
     local manualSearch = false
 
+    -- At the start of UpdateList, determine which word list to use
+    local activeWordList
+    if WordBrowserFrame and WordBrowserFrame.Visible then
+        activeWordList = SearchWords  -- Use sorted for Word Browser
+    else
+        activeWordList = DisplayWords -- Use scrambled for main display
+    end
+
+    -- Then when getting bucket:
+    local bucket
+    if firstChar and firstChar ~= "" and Buckets then
+        bucket = Buckets[firstChar] or {}  -- Buckets already use sorted words
+    else
+        bucket = activeWordList
+    end
+    
     if SearchBox and SearchBox.Text ~= "" then
         searchPrefix = SearchBox.Text:lower():gsub("[%s%c]+", "")
         manualSearch = true
