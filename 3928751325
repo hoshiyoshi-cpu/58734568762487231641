@@ -1916,6 +1916,48 @@ local function CheckSuffix(w)
     return #w >= #suffixMode and w:sub(-#suffixMode) == suffixMode
 end
 
+-- Cache for suffix priority checks
+local suffixPriorityCache = {}
+local lastSuffixPriorityMode = ""
+
+local function GetSuffixPriority(w)
+    if suffixMode == "" then return 0 end
+    
+    -- Clear cache if suffix mode changed
+    if suffixMode ~= lastSuffixPriorityMode then
+        suffixPriorityCache = {}
+        lastSuffixPriorityMode = suffixMode
+    end
+    
+    -- Check cache first
+    if suffixPriorityCache[w] ~= nil then
+        return suffixPriorityCache[w]
+    end
+    
+    local priority = 999  -- Default high number (low priority)
+    local suffixList = Config.SuffixModes
+    
+    if suffixList and #suffixList > 1 then
+        for idx, s in ipairs(suffixList) do
+            if #w >= #s and w:sub(-#s) == s then
+                priority = idx  -- Lower index = higher priority
+                break
+            end
+        end
+    elseif #suffixMode > 0 then
+        if #w >= #suffixMode and w:sub(-#suffixMode) == suffixMode then
+            priority = 1
+        end
+    end
+    
+    -- Cache result (limit size to prevent memory issues)
+    if #suffixPriorityCache < 2000 then
+        suffixPriorityCache[w] = priority
+    end
+    
+    return priority
+end
+
 -- =============================================
 -- MAIN WINDOW UPDATE LIST (WITH STRATEGIC SORTING)
 -- =============================================
@@ -1965,10 +2007,6 @@ UpdateList = function(detectedText, requiredLetter)
         local partials = {}
         local maxPartialLen = 0
         local MAX_RESULTS = 40
-        
-        -- Pre-compile suffix check for speed
-        local hasSuffixMode = (suffixMode ~= "")
-        local suffixList = Config.SuffixModes
         
         local function checkWord(w)
             if Blacklist[w] or UsedWords[w] then return end
@@ -2030,11 +2068,9 @@ UpdateList = function(detectedText, requiredLetter)
         
         -- Scan only the relevant range with a reasonable limit
         local MAX_SCAN = 800  -- Scan up to 800 words max to prevent lag
-        local scanned = 0
         
         for i = startIdx, math.min(endIdx, startIdx + MAX_SCAN) do
             local w = bucket[i]
-            scanned = scanned + 1
             
             -- Quick prefix check
             if #prefix == 0 or w:sub(1, #prefix) == prefix then
@@ -2053,32 +2089,11 @@ UpdateList = function(detectedText, requiredLetter)
         if #fe > 0 then exacts = fe end
     end
 
-    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 40 then
-        local alreadyIn = {}
-        for _, w in ipairs(exacts) do alreadyIn[w] = true end
-        local padding = {}
-        local startIndex = BinarySearchStart(bucket, searchPrefix)
-        if startIndex ~= -1 then
-            for i = startIndex, #bucket do
-                local w = bucket[i]
-                if w:sub(1, #searchPrefix) ~= searchPrefix then break end
-                if not Blacklist[w] and not UsedWords[w] and not alreadyIn[w] then
-                    table.insert(padding, w)
-                end
-            end
-        end
-        table.sort(padding, function(a, b) return #a < #b end)
-        for _, w in ipairs(padding) do
-            if #exacts >= 30 then break end
-            table.insert(exacts, w)
-        end
-    end
-
     if #exacts > 0 then
         matches = exacts
-        if #matches > 40 then
+        if #matches > 200 then
             local trimmed = {}
-            for i = 1, 40 do
+            for i = 1, 200 do
                 table.insert(trimmed, matches[i])
             end
             matches = trimmed
@@ -2110,7 +2125,7 @@ UpdateList = function(detectedText, requiredLetter)
     end
 
     if #matches > 0 then
-        -- Don't filter out non-suffix words, just separate them for prioritization
+        -- Separate suffix-matching words for prioritization (but keep ALL words)
         local suffixMatches = {}
         local otherMatches = {}
         
@@ -2118,19 +2133,19 @@ UpdateList = function(detectedText, requiredLetter)
             if lengthMode == 0 or #w == lengthMode then
                 local priority = GetSuffixPriority(w)
                 if priority <= #Config.SuffixModes then  -- Matches a suffix
-                    table.insert(suffixMatches, {word = w, priority = priority})
+                    table.insert(suffixMatches, {word = w, priority = priority, len = #w})
                 else
                     table.insert(otherMatches, w)
                 end
             end
         end
         
-        -- Sort suffix matches by priority then length
+        -- Sort suffix matches by priority first, then by length
         table.sort(suffixMatches, function(a, b)
             if a.priority ~= b.priority then
                 return a.priority < b.priority
             end
-            return #a.word < #b.word
+            return a.len < b.len
         end)
         
         -- Extract just the words from suffixMatches
@@ -2139,7 +2154,7 @@ UpdateList = function(detectedText, requiredLetter)
             table.insert(sortedSuffix, entry.word)
         end
         
-        -- Now apply the selected sort mode to BOTH groups combined
+        -- Combine suffix matches first, then all other words
         local combined = {}
         for _, w in ipairs(sortedSuffix) do table.insert(combined, w) end
         for _, w in ipairs(otherMatches) do table.insert(combined, w) end
@@ -2149,8 +2164,9 @@ UpdateList = function(detectedText, requiredLetter)
         -- Apply the selected sort mode
         if sortMode == "Strategic" then
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
+            
         elseif sortMode == "Shortest" then
-            -- Group by length while preserving order
+            -- Group by length while preserving order (suffix matches already at top)
             local lengthGroups = {}
             local orderTracker = {}
             
@@ -2388,7 +2404,6 @@ UpdateList = function(detectedText, requiredLetter)
 
     ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
 end
-
 -- =============================================
 -- MINIMIZE
 -- =============================================
