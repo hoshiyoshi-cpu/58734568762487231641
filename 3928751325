@@ -1953,491 +1953,204 @@ end
 local lastRequiredLetter = ""
 
 UpdateList = function(detectedText, requiredLetter)
-    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode)
-    if hash == lastUpdateHash and not forceUpdateList then return end
-    lastUpdateHash = hash
-
     local matches = {}
-    local searchPrefix = detectedText
+    local searchPrefix = detectedText or ""
     local isBacktracked = false
     local manualSearch = false
 
+    -- Get search prefix
     if SearchBox and SearchBox.Text ~= "" then
         searchPrefix = SearchBox.Text:lower():gsub("[%s%c]+", "")
         manualSearch = true
-        if requiredLetter and searchPrefix:sub(1,1) ~= requiredLetter:sub(1,1):lower() then
-            requiredLetter = nil
-        end
     end
 
-    if not manualSearch and requiredLetter and #requiredLetter > 0 then
-        local reqLen = GetMatchLength(requiredLetter, searchPrefix)
-        if reqLen == #searchPrefix and #requiredLetter > #searchPrefix then
-            searchPrefix = requiredLetter
-        end
-    end
-
+    -- Get bucket
     local firstChar = searchPrefix:sub(1,1)
-    if firstChar == "#" then firstChar = nil end
-    if (not firstChar or firstChar == "") and requiredLetter then
-        firstChar = requiredLetter:sub(1,1):lower()
+    if firstChar == "" or firstChar == "#" then
+        firstChar = requiredLetter and requiredLetter:sub(1,1):lower() or nil
+    end
+    
+    local bucket = Words
+    if firstChar and Buckets and Buckets[firstChar] then
+        bucket = Buckets[firstChar]
     end
 
-    local bucket
-    if firstChar and firstChar ~= "" and Buckets then
-        bucket = Buckets[firstChar] or {}
-    else
-        bucket = Words
-    end
-
-    local function CollectMatches(prefix, ignoreLengthFilter)
-        local exacts = {}
-        local partials = {}
-        local maxPartialLen = 0
-        local MAX_RESULTS = 40
-        
-        local function checkWord(w)
-            if Blacklist[w] or UsedWords[w] then return end
-            
-            if not CheckSuffix(w) then return end
-            
-            if not ignoreLengthFilter and lengthMode > 0 and #w ~= lengthMode then return end
-            
-            local mLen = GetMatchLength(w, prefix)
-            if mLen == #prefix then
-                table.insert(exacts, w)
-                return true
-            elseif #exacts == 0 then
-                if mLen > maxPartialLen then
-                    maxPartialLen = mLen
-                    partials = {w}
-                    return true
-                elseif mLen == maxPartialLen and mLen > 0 then
-                    if #partials < 40 then 
-                        table.insert(partials, w)
-                        return true
-                    end
-                end
-            end
-            return false
-        end
-        
-        local useBinary = not (prefix:find("#") or prefix:find("%*"))
-        if useBinary and #prefix > 0 then
-            local startIndex = BinarySearchStart(bucket, prefix)
-            if startIndex ~= -1 then
-                for i = startIndex, #bucket do
-                    local w = bucket[i]
-                    if w:sub(1, #prefix) ~= prefix then break end
-                    local added = checkWord(w)
-                    if added and #exacts >= 40 then break end
-                end
-            end
-        else
-            for _, w in ipairs(bucket) do
-                local added = checkWord(w)
-                if added and #exacts >= 40 then break end
-            end
-        end
-        
-        return exacts, partials, maxPartialLen
-    end
-
-    local exacts, partials, pLen = CollectMatches(searchPrefix, false)
-
-    if #exacts == 0 and lengthMode > 0 then
-        local fe, _, _ = CollectMatches(searchPrefix, true)
-        if #fe > 0 then exacts = fe end
-    end
-
-    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 40 then
-        local alreadyIn = {}
-        for _, w in ipairs(exacts) do alreadyIn[w] = true end
-        local padding = {}
-        local startIndex = BinarySearchStart(bucket, searchPrefix)
-        if startIndex ~= -1 then
-            for i = startIndex, #bucket do
-                local w = bucket[i]
-                if w:sub(1, #searchPrefix) ~= searchPrefix then break end
-                if not Blacklist[w] and not UsedWords[w] and not alreadyIn[w] then
-                    table.insert(padding, w)
-                end
-            end
-        end
-        table.sort(padding, function(a, b) return #a < #b end)
-        for _, w in ipairs(padding) do
-            if #exacts >= 30 then break end
-            table.insert(exacts, w)
-        end
-    end
-
-    if #exacts > 0 then
-        matches = exacts
-        if #matches > 40 then
-            local trimmed = {}
-            for i = 1, 40 do
-                table.insert(trimmed, matches[i])
-            end
-            matches = trimmed
-        end
-    elseif pLen > 0 then
-        matches = partials
-        searchPrefix = searchPrefix:sub(1, pLen)
-        isBacktracked = true
-    elseif requiredLetter and #requiredLetter > 0 then
-        local reqChar = requiredLetter:sub(1,1):lower()
-        if searchPrefix:sub(1,1):lower() ~= reqChar then
-            local fallbackBucket = (Buckets and Buckets[reqChar]) or Words
-            if fallbackBucket then
-                for _, w in ipairs(fallbackBucket) do
-                    if not Blacklist[w] and not UsedWords[w] then
-                        local mLen = GetMatchLength(w, requiredLetter)
-                        if mLen == #requiredLetter then
-                            table.insert(matches, w)
-                            if #matches >= 200 then break end
-                        end
-                    end
-                end
-            end
-            if #matches > 0 then
-                searchPrefix = requiredLetter
-                isBacktracked = true
-            end
-        end
-    end
-
-    -- FALLBACK: If still no matches, show all words (ignore filters)
-    if #matches == 0 then
-        local oldSuffixMode = suffixMode
-        local oldLengthMode = lengthMode
-        suffixMode = ""
-        lengthMode = 0
-        
-        local fallbackMatches = {}
-        local fallbackBucket = Buckets[searchPrefix:sub(1,1)] or Words
-        for _, w in ipairs(fallbackBucket) do
+    -- COLLECT MATCHES - SIMPLE VERSION
+    for _, w in ipairs(bucket) do
+        -- Skip blacklisted and used
+        if not Blacklist[w] and not UsedWords[w] then
+            -- Check prefix match
             if w:sub(1, #searchPrefix) == searchPrefix then
-                if not Blacklist[w] and not UsedWords[w] then
-                    table.insert(fallbackMatches, w)
-                    if #fallbackMatches >= 20 then break end
+                -- Check suffix filter
+                local suffixOk = true
+                if suffixMode ~= "" then
+                    suffixOk = w:sub(-#suffixMode) == suffixMode
+                end
+                -- Check length filter
+                local lengthOk = true
+                if lengthMode > 0 then
+                    lengthOk = #w == lengthMode
+                end
+                
+                if suffixOk and lengthOk then
+                    table.insert(matches, w)
                 end
             end
         end
-        
-        if #fallbackMatches > 0 then
-            matches = fallbackMatches
-            StatusText.Text = "Filters removed - showing all matches"
+        -- Limit to 100 matches for performance
+        if #matches >= 100 then break end
+    end
+
+    -- FORCE DISPLAY: If no matches, show ALL words that start with prefix (ignore filters)
+    if #matches == 0 then
+        for _, w in ipairs(bucket) do
+            if not Blacklist[w] and not UsedWords[w] then
+                if w:sub(1, #searchPrefix) == searchPrefix then
+                    table.insert(matches, w)
+                    if #matches >= 40 then break end
+                end
+            end
+        end
+        if #matches > 0 then
+            StatusText.Text = "No filter matches - showing all words"
             StatusText.TextColor3 = THEME.Warning
         end
-        
-        suffixMode = oldSuffixMode
-        lengthMode = oldLengthMode
     end
 
-    if #matches > 0 then
-        local filtered = {}
-        local padding = {}
-        for _, w in ipairs(matches) do
-            if CheckSuffix(w) and (lengthMode == 0 or #w == lengthMode) then
-                table.insert(filtered, w)
-            else
-                table.insert(padding, w)
+    -- FORCE DISPLAY PART 2: If STILL no matches, show ANY words from bucket
+    if #matches == 0 and #bucket > 0 then
+        for _, w in ipairs(bucket) do
+            if not Blacklist[w] and not UsedWords[w] then
+                table.insert(matches, w)
+                if #matches >= 20 then break end
             end
         end
-        
-        -- FAST STRATEGIC SORT (finds best 40)
-        if sortMode == "Strategic" then
-            filtered = StrategicSort(filtered, searchPrefix, UsedWords)
-            
-        elseif sortMode == "Shortest" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            local lengthGroups = {}
-            local lengthOrder = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(lengthOrder, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(lengthOrder)
-            
-            local sorted = {}
-            for _, len in ipairs(lengthOrder) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sorted, word)
-                end
-            end
-            
-            local limited = {}
-            for i = 1, math.min(40, #sorted) do
-                table.insert(limited, sorted[i])
-            end
-            filtered = limited
-            
-        elseif sortMode == "Random" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            local lengthGroups = {}
-            local lengthOrder = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(lengthOrder, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(lengthOrder)
-            
-            local result = {}
-            for _, len in ipairs(lengthOrder) do
-                local group = lengthGroups[len]
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-                for _, word in ipairs(group) do
-                    table.insert(result, word)
-                end
-            end
-            
-            local limited = {}
-            for i = 1, math.min(40, #result) do
-                table.insert(limited, result[i])
-            end
-            filtered = limited
-            
-        elseif sortMode == "Smart" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            local lengthGroups = {}
-            local lengthOrder = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(lengthOrder, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(lengthOrder)
-            
-            local smartResult = {}
-            for _, len in ipairs(lengthOrder) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(smartResult, word)
-                end
-            end
-            
-            local SHORT_THRESHOLD = 6
-            local shortResult = {}
-            local longResult = {}
-            
-            for _, word in ipairs(smartResult) do
-                if #word <= SHORT_THRESHOLD then
-                    table.insert(shortResult, word)
-                else
-                    table.insert(longResult, word)
-                end
-            end
-            
-            for i = #longResult, 2, -1 do
-                local j = math.random(i)
-                longResult[i], longResult[j] = longResult[j], longResult[i]
-            end
-            
-            local finalResult = {}
-            for _, word in ipairs(shortResult) do
-                table.insert(finalResult, word)
-            end
-            for _, word in ipairs(longResult) do
-                table.insert(finalResult, word)
-            end
-            
-            if #finalResult > 40 then
-                local limited = {}
-                for i = 1, 40 do
-                    table.insert(limited, finalResult[i])
-                end
-                filtered = limited
-            else
-                filtered = finalResult
-            end
+        if #matches > 0 then
+            StatusText.Text = "No prefix matches - showing random words"
+            StatusText.TextColor3 = THEME.Warning
         end
-        
-        table.sort(padding, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return false
+    end
+
+    -- Apply sorting based on mode
+    if sortMode == "Shortest" then
+        table.sort(matches, function(a, b)
+            return #a < #b
         end)
-        if #padding > 40 then
-            local limitedPadding = {}
-            for i = 1, 40 do
-                table.insert(limitedPadding, padding[i])
-            end
-            padding = limitedPadding
+    elseif sortMode == "Random" then
+        for i = #matches, 2, -1 do
+            local j = math.random(i)
+            matches[i], matches[j] = matches[j], matches[i]
         end
-    
+    elseif sortMode == "Smart" then
+        local shortWords = {}
+        local longWords = {}
+        for _, w in ipairs(matches) do
+            if #w <= 6 then
+                table.insert(shortWords, w)
+            else
+                table.insert(longWords, w)
+            end
+        end
+        table.sort(shortWords, function(a, b) return #a < #b end)
+        for i = #longWords, 2, -1 do
+            local j = math.random(i)
+            longWords[i], longWords[j] = longWords[j], longWords[i]
+        end
         matches = {}
-        for _, w in ipairs(filtered) do table.insert(matches, w) end
-        for _, w in ipairs(padding) do table.insert(matches, w) end
+        for _, w in ipairs(shortWords) do table.insert(matches, w) end
+        for _, w in ipairs(longWords) do table.insert(matches, w) end
     end
 
+    -- Limit to 15 displayed words
     local displayList = {}
-    local maxDisplay = 15
-    for i = 1, math.min(maxDisplay, #matches) do
+    for i = 1, math.min(15, #matches) do
         table.insert(displayList, matches[i])
     end
 
-    if #matches > 0 and not isBacktracked then
-        currentBestMatch = matches[1]
-    else
-        currentBestMatch = nil
-    end
-
-    if isBacktracked then
-        local validPart = searchPrefix
-        local invalidPart = (detectedText or ""):sub(#searchPrefix + 1)
-        local accentRGB = ColorToRGB(THEME.Accent)
-        StatusText.Text = "No match: <font color=\"rgb(" .. accentRGB .. ")\">" .. validPart .. "</font><font color=\"rgb(255,80,80)\">" .. invalidPart .. "</font>"
-        StatusText.TextColor3 = THEME.SubText
-    end
-
-    for i = 1, math.max(#displayList, #ButtonCache) do
-        local w = displayList[i]
+    -- UPDATE BUTTONS - FORCE REFRESH
+    for i = 1, #ButtonCache do
         local btn = ButtonCache[i]
-
-        if w then
-            local lbl
-            if not btn then
-                btn = Instance.new("TextButton")
-                btn.Size = UDim2.new(1, -6, 0, 30)
-                btn.BackgroundColor3 = THEME.ItemBG
-                btn.Text = ""
-                btn.AutoButtonColor = false
-                Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-
-                lbl = Instance.new("TextLabel", btn)
-                lbl.Name = "Label"
-                lbl.Size = UDim2.new(1, -20, 1, 0)
-                lbl.Position = UDim2.new(0, 10, 0, 0)
-                lbl.BackgroundTransparency = 1
-                lbl.Font = Enum.Font.GothamMedium
-                lbl.TextSize = 14
-                lbl.TextXAlignment = Enum.TextXAlignment.Left
-                lbl.RichText = true
-
-                btn.MouseEnter:Connect(function() Tween(btn, {BackgroundColor3 = Color3.fromRGB(45,45,55)}) end)
-                btn.MouseLeave:Connect(function() Tween(btn, {BackgroundColor3 = THEME.ItemBG}) end)
-
-                btn.MouseButton1Click:Connect(function()
-                    local d = ButtonData[btn]
-                    if d then
-                        local l = btn:FindFirstChild("Label")
-                        if l then l.TextColor3 = THEME.Success end
-                        Tween(btn, {BackgroundColor3 = Color3.fromRGB(30,60,40)})
-                        UsedWords[d.word] = tick()
-                        forceUpdateList = true
-                    end
-                end)
-
-                btn.Parent = ScrollList
-                table.insert(ButtonCache, btn)
-            else
-                lbl = btn:FindFirstChild("Label")
-                btn.Visible = true
-                btn.Parent = ScrollList
-                btn.BackgroundColor3 = THEME.ItemBG
-                if lbl then lbl.TextColor3 = THEME.Text end
-            end
-
-            ButtonData[btn] = {word = w, detected = detectedText}
-
-            local accentRGB = ColorToRGB(THEME.Accent)
-            if sortMode == "Strategic" then
-                if i == 1 then 
-                    accentRGB = "100,255,140"
-                elseif i == 2 then 
-                    accentRGB = "255,200,100"
-                elseif i == 3 then 
-                    accentRGB = "100,200,255"
-                end
-            elseif i == 1 then
-                accentRGB = "100,255,140"
-            elseif i == 2 then
-                accentRGB = "255,180,200"
-            elseif i == 3 then
-                accentRGB = "100,200,255"
-            end
-
-            local textRGB = ColorToRGB(THEME.Text)
-            local displayText = ""
-            if isBacktracked then
-                local prefix = w:sub(1, #searchPrefix)
-                local suffix = w:sub(#searchPrefix + 1)
-                displayText = "<font color=\"rgb(" .. accentRGB .. ")\">" .. prefix .. "</font>"
-                    .. "<font color=\"rgb(" .. textRGB .. ")\">" .. suffix .. "</font>"
-            else
-                local prefix = w:sub(1, #(detectedText or ""))
-                local suffix = w:sub(#(detectedText or "") + 1)
-                displayText = "<font color=\"rgb(" .. accentRGB .. ")\">" .. prefix .. "</font>"
-                    .. "<font color=\"rgb(" .. textRGB .. ")\">" .. suffix .. "</font>"
-            end
-
-            if lbl then lbl.Text = displayText end
-        else
-            if btn then
-                btn.Visible = false
-                ButtonData[btn] = nil
-            end
+        if btn then
+            btn.Visible = false
+            ButtonData[btn] = nil
         end
     end
 
-    ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
+    -- CREATE NEW BUTTONS
+    for i, w in ipairs(displayList) do
+        local btn = ButtonCache[i]
+        if not btn then
+            btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, -6, 0, 30)
+            btn.BackgroundColor3 = THEME.ItemBG
+            btn.Text = ""
+            btn.AutoButtonColor = false
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+            local lbl = Instance.new("TextLabel", btn)
+            lbl.Name = "Label"
+            lbl.Size = UDim2.new(1, -20, 1, 0)
+            lbl.Position = UDim2.new(0, 10, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Font = Enum.Font.GothamMedium
+            lbl.TextSize = 14
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.RichText = true
+
+            btn.MouseButton1Click:Connect(function()
+                local d = ButtonData[btn]
+                if d then
+                    UsedWords[d.word] = tick()
+                    forceUpdateList = true
+                    local lbl = btn:FindFirstChild("Label")
+                    if lbl then 
+                        lbl.TextColor3 = THEME.Success
+                        task.delay(0.5, function()
+                            if lbl then lbl.TextColor3 = THEME.Text end
+                        end)
+                    end
+                end
+            end)
+
+            btn.Parent = ScrollList
+            ButtonCache[i] = btn
+        end
+        
+        btn.Visible = true
+        ButtonData[btn] = {word = w, detected = detectedText}
+        
+        local lbl = btn:FindFirstChild("Label")
+        if lbl then
+            local prefix = w:sub(1, #(detectedText or ""))
+            local suffix = w:sub(#(detectedText or "") + 1)
+            local accentRGB = ColorToRGB(THEME.Accent)
+            local textRGB = ColorToRGB(THEME.Text)
+            lbl.Text = "<font color=\"rgb(" .. accentRGB .. ")\">" .. prefix .. "</font><font color=\"rgb(" .. textRGB .. ")\">" .. suffix .. "</font>"
+        end
+    end
+
+    -- Hide extra buttons
+    for i = #displayList + 1, #ButtonCache do
+        if ButtonCache[i] then
+            ButtonCache[i].Visible = false
+        end
+    end
+
+    -- Update canvas size
+    ScrollList.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+    
+    -- Update status if we have matches
+    if #matches > 0 then
+        if StatusText.Text ~= "Filters removed - showing all words" and StatusText.Text ~= "No prefix matches - showing random words" then
+            StatusText.Text = "Found " .. #matches .. " words"
+            StatusText.TextColor3 = THEME.Success
+            Tween(StatusDot, {BackgroundColor3 = THEME.Success})
+        end
+    elseif #matches == 0 then
+        StatusText.Text = "No words found!"
+        StatusText.TextColor3 = THEME.Warning
+        Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
+    end
 end
 
 -- =============================================
