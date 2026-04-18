@@ -202,7 +202,13 @@ local function FetchWords()
     end)
     if success and res and res.Body then
         writefile(fileName, res.Body)
-        UpdateStatus("Fetched successfully!", THEME.Success)
+        -- Verify the file was written
+        if isfile(fileName) then
+            local size = readfile(fileName):len()
+            UpdateStatus("Fetched " .. size .. " bytes!", THEME.Success)
+        else
+            UpdateStatus("File not saved!", Color3.fromRGB(255, 80, 80))
+        end
     else
         UpdateStatus("Fetch failed! Using cached.", Color3.fromRGB(255, 80, 80))
     end
@@ -453,8 +459,11 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
     return result
 end
 
+-- Replace your existing LoadList function
 local function LoadList(fname)
     UpdateStatus("Parsing word list...", THEME.Warning)
+    local loadedCount = 0
+    
     if isfile(fname) then
         local content = readfile(fname)
         for w in content:gmatch("[^\r\n]+") do
@@ -462,19 +471,43 @@ local function LoadList(fname)
             if #clean > 0 and not SeenWords[clean] then
                 SeenWords[clean] = true
                 table.insert(Words, clean)
+                loadedCount = loadedCount + 1
             end
         end
-        UpdateStatus("Loaded " .. #Words .. " words!", THEME.Success)
+        UpdateStatus("Loaded " .. loadedCount .. " words!", THEME.Success)
     else
         UpdateStatus("No word list found!", Color3.fromRGB(255, 80, 80))
     end
+    
+    -- FALLBACK: If no words loaded, add some default words
+    if #Words == 0 then
+        UpdateStatus("No words found! Using fallback list...", THEME.Warning)
+        local fallbackWords = {
+            "moed", "muga", "okia", "haed", "toed", "whio", "ajis", "baze", 
+            "yuma", "whyo", "nupe", "hyps", "soso", "waar", "gaen", "teju", 
+            "waeg", "hoed", "maed", "puma"
+        }
+        for _, w in ipairs(fallbackWords) do
+            if not SeenWords[w] then
+                SeenWords[w] = true
+                table.insert(Words, w)
+            end
+        end
+        UpdateStatus("Loaded " .. #Words .. " fallback words!", THEME.Success)
+    end
+    
     task.wait(1)
 end
 
+-- Replace the bucket creation section (remove table.sort!)
 LoadList(fileName)
 
 if LoadingGui then LoadingGui:Destroy() end
 
+-- DON'T sort the words - preserve original order
+-- table.sort(Words)  -- COMMENTED OUT - NO ALPHABETICAL SORT!
+
+-- Build buckets while preserving original order
 Buckets = {}
 for _, w in ipairs(Words) do
     local c = w:sub(1,1) or ""
@@ -483,17 +516,12 @@ for _, w in ipairs(Words) do
     table.insert(Buckets[c], w)
 end
 
-if Config.CustomWords then
-    for _, w in ipairs(Config.CustomWords) do
-        local clean = w:gsub("[%s%c]+", ""):lower()
-        if #clean > 0 and not SeenWords[clean] then
-            SeenWords[clean] = true
-            table.insert(Words, clean)
-            local c = clean:sub(1,1) or ""
-            if c == "" then c = "#" end
-            Buckets[c] = Buckets[c] or {}
-            table.insert(Buckets[c], clean)
-        end
+-- Debug: Print bucket sizes
+print("=== WORD LOAD DEBUG ===")
+print("Total words loaded:", #Words)
+for letter, bucket in pairs(Buckets) do
+    if #bucket > 0 then
+        print("Bucket '" .. letter .. "':", #bucket, "words (first:", bucket[1], ")")
     end
 end
 
@@ -2078,6 +2106,34 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
 
+    -- FALLBACK: If still no matches, show all words (ignore filters)
+    if #matches == 0 then
+        local oldSuffixMode = suffixMode
+        local oldLengthMode = lengthMode
+        suffixMode = ""
+        lengthMode = 0
+        
+        local fallbackMatches = {}
+        local fallbackBucket = Buckets[searchPrefix:sub(1,1)] or Words
+        for _, w in ipairs(fallbackBucket) do
+            if w:sub(1, #searchPrefix) == searchPrefix then
+                if not Blacklist[w] and not UsedWords[w] then
+                    table.insert(fallbackMatches, w)
+                    if #fallbackMatches >= 20 then break end
+                end
+            end
+        end
+        
+        if #fallbackMatches > 0 then
+            matches = fallbackMatches
+            StatusText.Text = "Filters removed - showing all matches"
+            StatusText.TextColor3 = THEME.Warning
+        end
+        
+        suffixMode = oldSuffixMode
+        lengthMode = oldLengthMode
+    end
+
     if #matches > 0 then
         local filtered = {}
         local padding = {}
@@ -2108,23 +2164,24 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            -- Group by length (preserves original order within each group)
             local lengthGroups = {}
+            local lengthOrder = {}
+            
             for _, word in ipairs(customFiltered) do
                 local len = #word
                 if not lengthGroups[len] then
                     lengthGroups[len] = {}
+                    table.insert(lengthOrder, len)
                 end
                 table.insert(lengthGroups[len], word)
             end
             
-            -- Rebuild sorted by length (shortest to longest, keeping original order within each length)
+            table.sort(lengthOrder)
+            
             local sorted = {}
-            for len = 1, 20 do  -- assuming max word length 20
-                if lengthGroups[len] then
-                    for _, word in ipairs(lengthGroups[len]) do
-                        table.insert(sorted, word)
-                    end
+            for _, len in ipairs(lengthOrder) do
+                for _, word in ipairs(lengthGroups[len]) do
+                    table.insert(sorted, word)
                 end
             end
             
@@ -2135,7 +2192,6 @@ UpdateList = function(detectedText, requiredLetter)
             filtered = limited
             
         elseif sortMode == "Random" then
-            -- Filter by custom prefixes
             local customFiltered = {}
             if Config.CustomWords and #Config.CustomWords > 0 then
                 for _, word in ipairs(filtered) do
@@ -2150,105 +2206,110 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            table.sort(customFiltered, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return false
-            end)
-            
-            local limited = {}
-            for i = 1, math.min(40, #customFiltered) do
-                table.insert(limited, customFiltered[i])
-            end
-            
-            -- Shuffle
-            for i = #limited, 2, -1 do
-                local j = math.random(i)
-                limited[i], limited[j] = limited[j], limited[i]
-            end
-            filtered = limited
-            
-        elseif sortMode == "Smart" then
-            -- FIXED SMART MODE: Shuffle first, then sort by length while preserving random order within same length
-            
-            -- FIRST: Filter by custom prefixes
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            -- SHUFFLE THE ENTIRE LIST FIRST (this randomizes the order)
-            for i = #customFiltered, 2, -1 do
-                local j = math.random(i)
-                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
-            end
-            
-            -- Separate short words (6 letters or less) from long words
-            local SHORT_THRESHOLD = 6
-            local shortWords = {}
-            local longWords = {}
+            local lengthGroups = {}
+            local lengthOrder = {}
             
             for _, word in ipairs(customFiltered) do
-                if #word <= SHORT_THRESHOLD then
-                    table.insert(shortWords, word)
-                else
-                    table.insert(longWords, word)
-                end
-            end
-            
-            local smartResult = {}
-            
-            -- Group short words by length (preserving the shuffled order within each length)
-            local lengthGroups = {}
-            for _, word in ipairs(shortWords) do
                 local len = #word
                 if not lengthGroups[len] then
                     lengthGroups[len] = {}
+                    table.insert(lengthOrder, len)
                 end
                 table.insert(lengthGroups[len], word)
             end
             
-            -- Add short words sorted by length (shortest first), preserving shuffled order within same length
-            for len = 1, SHORT_THRESHOLD do
-                if lengthGroups[len] then
-                    for _, word in ipairs(lengthGroups[len]) do
-                        table.insert(smartResult, word)
+            table.sort(lengthOrder)
+            
+            local result = {}
+            for _, len in ipairs(lengthOrder) do
+                local group = lengthGroups[len]
+                for i = #group, 2, -1 do
+                    local j = math.random(i)
+                    group[i], group[j] = group[j], group[i]
+                end
+                for _, word in ipairs(group) do
+                    table.insert(result, word)
+                end
+            end
+            
+            local limited = {}
+            for i = 1, math.min(40, #result) do
+                table.insert(limited, result[i])
+            end
+            filtered = limited
+            
+        elseif sortMode == "Smart" then
+            local customFiltered = {}
+            if Config.CustomWords and #Config.CustomWords > 0 then
+                for _, word in ipairs(filtered) do
+                    for _, customPrefix in ipairs(Config.CustomWords) do
+                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
+                            table.insert(customFiltered, word)
+                            break
+                        end
                     end
                 end
-            end
-            
-            -- Shuffle long words and add them
-            if #longWords > 0 then
-                for i = #longWords, 2, -1 do
-                    local j = math.random(i)
-                    longWords[i], longWords[j] = longWords[j], longWords[i]
-                end
-                for i = 1, math.min(30, #longWords) do
-                    table.insert(smartResult, longWords[i])
-                end
-            end
-            
-            -- Final limit to 40 total words
-            if #smartResult > 40 then
-                local final = {}
-                for i = 1, 40 do
-                    table.insert(final, smartResult[i])
-                end
-                filtered = final
             else
-                filtered = smartResult
+                customFiltered = filtered
+            end
+            
+            local lengthGroups = {}
+            local lengthOrder = {}
+            
+            for _, word in ipairs(customFiltered) do
+                local len = #word
+                if not lengthGroups[len] then
+                    lengthGroups[len] = {}
+                    table.insert(lengthOrder, len)
+                end
+                table.insert(lengthGroups[len], word)
+            end
+            
+            table.sort(lengthOrder)
+            
+            local smartResult = {}
+            for _, len in ipairs(lengthOrder) do
+                for _, word in ipairs(lengthGroups[len]) do
+                    table.insert(smartResult, word)
+                end
+            end
+            
+            local SHORT_THRESHOLD = 6
+            local shortResult = {}
+            local longResult = {}
+            
+            for _, word in ipairs(smartResult) do
+                if #word <= SHORT_THRESHOLD then
+                    table.insert(shortResult, word)
+                else
+                    table.insert(longResult, word)
+                end
+            end
+            
+            for i = #longResult, 2, -1 do
+                local j = math.random(i)
+                longResult[i], longResult[j] = longResult[j], longResult[i]
+            end
+            
+            local finalResult = {}
+            for _, word in ipairs(shortResult) do
+                table.insert(finalResult, word)
+            end
+            for _, word in ipairs(longResult) do
+                table.insert(finalResult, word)
+            end
+            
+            if #finalResult > 40 then
+                local limited = {}
+                for i = 1, 40 do
+                    table.insert(limited, finalResult[i])
+                end
+                filtered = limited
+            else
+                filtered = finalResult
             end
         end
         
-        -- Padding always by length (limited to 40)
         table.sort(padding, function(a, b)
             if #a ~= #b then return #a < #b end
             return false
