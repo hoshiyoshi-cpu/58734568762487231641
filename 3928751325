@@ -475,13 +475,12 @@ LoadList(fileName)
 
 if LoadingGui then LoadingGui:Destroy() end
 
-table.sort(Words)
 Buckets = {}
 for _, w in ipairs(Words) do
     local c = w:sub(1,1) or ""
     if c == "" then c = "#" end
     Buckets[c] = Buckets[c] or {}
-    table.insert(Buckets[c], w)
+    table.insert(Buckets[c], w)  -- Now preserves original order from gives.txt
 end
 
 if Config.CustomWords then
