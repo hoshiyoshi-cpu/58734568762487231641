@@ -2266,20 +2266,6 @@ UpdateList = function(detectedText, requiredLetter)
             else
                 filtered = finalResult
             end
-
-        
-        -- Padding always by length (limited to 40)
-        table.sort(padding, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return false
-        end)
-        if #padding > 40 then
-            local limitedPadding = {}
-            for i = 1, 40 do
-                table.insert(limitedPadding, padding[i])
-            end
-            padding = limitedPadding
-        end
     
         matches = {}
         for _, w in ipairs(filtered) do table.insert(matches, w) end
