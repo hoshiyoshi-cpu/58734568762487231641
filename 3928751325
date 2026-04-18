@@ -263,7 +263,7 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     -- Use local references for faster access
     local giveWordsLookup = GiveWordsLookup
     local SHORT_THRESHOLD = 5
-    local MAX_WORDS = 40
+    local MAX_WORDS = 100
     
     -- Pre-allocate arrays with estimated capacity
     local priorityWords = {}
@@ -311,7 +311,7 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     end
     
     -- Limit to max words while preserving order
-    local function limitTo40(arr)
+    local function limitTo100(arr)
         local n = #arr
         if n > MAX_WORDS then
             local limited = {}
@@ -329,9 +329,9 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     table.sort(otherWords, sortByLength)
     
     -- Shuffle within tiers and limit
-    priorityWords = shuffle(limitTo40(priorityWords))
-    shortWords = shuffle(limitTo40(shortWords))
-    otherWords = shuffle(limitTo40(otherWords))
+    priorityWords = shuffle(limitTo100(priorityWords))
+    shortWords = shuffle(limitTo100(shortWords))
+    otherWords = shuffle(limitTo100(otherWords))
     
     -- Build result by extracting .word from data objects
     local totalCount = #priorityWords + #shortWords + #otherWords
@@ -441,10 +441,10 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
         end
     end
     
-    -- Final limit to 40 total words
-    if #result > 40 then
+    -- Final limit to 100 total words
+    if #result > 100 then
         local final = {}
-        for i = 1, 40 do
+        for i = 1, 100 do
             table.insert(final, result[i])
         end
         return final
@@ -1876,7 +1876,8 @@ local function GetMatchLength(str, prefix)
     local max = math.min(#str, #prefix)
     for i = 1, max do
         local pb = string.byte(prefix, i)
-        if pb == 35 or pb == string.byte(str, i) then
+        local sb = string.byte(str, i)
+        if pb == 35 or pb == sb then  -- 35 is '#'
             len = i
         else
             break
@@ -1886,24 +1887,21 @@ local function GetMatchLength(str, prefix)
 end
 
 local function BinarySearchStart(list, prefix)
-    local left = 1
-    local right = #list
-    local result = -1
-    local pLen = #prefix
-    while left <= right do
-        local mid = math.floor((left + right) / 2)
-        local word = list[mid]
-        local sub = word:sub(1, pLen)
-        if sub == prefix then
-            result = mid
-            right = mid - 1
-        elseif sub < prefix then
-            left = mid + 1
-        else
-            right = mid - 1
+    -- Fallback to linear search if list isn't properly sorted
+    -- This is safer and more reliable
+    for i = 1, #list do
+        local word = list[i]
+        if word:sub(1, #prefix) == prefix then
+            return i
+        end
+        if word > prefix then
+            -- If we've passed where the word would be, stop
+            if word:sub(1, 1) > prefix:sub(1, 1) then
+                break
+            end
         end
     end
-    return result
+    return -1
 end
 
 local function CheckSuffix(w)
@@ -1966,7 +1964,7 @@ UpdateList = function(detectedText, requiredLetter)
         local exacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local MAX_RESULTS = 40
+        local MAX_RESULTS = 100
         
         local function checkWord(w)
             if Blacklist[w] or UsedWords[w] then return end
@@ -1985,7 +1983,7 @@ UpdateList = function(detectedText, requiredLetter)
                     partials = {w}
                     return true
                 elseif mLen == maxPartialLen and mLen > 0 then
-                    if #partials < 40 then 
+                    if #partials < MAX_RESULTS then 
                         table.insert(partials, w)
                         return true
                     end
@@ -1994,21 +1992,16 @@ UpdateList = function(detectedText, requiredLetter)
             return false
         end
         
-        local useBinary = not (prefix:find("#") or prefix:find("%*"))
-        if useBinary and #prefix > 0 then
-            local startIndex = BinarySearchStart(bucket, prefix)
-            if startIndex ~= -1 then
-                for i = startIndex, #bucket do
-                    local w = bucket[i]
-                    if w:sub(1, #prefix) ~= prefix then break end
-                    local added = checkWord(w)
-                    if added and #exacts >= 40 then break end
-                end
-            end
-        else
-            for _, w in ipairs(bucket) do
+        -- Use linear search for reliability (fixes the "mae" and "sa" issue)
+        -- Binary search was skipping words due to sorting issues
+        for _, w in ipairs(bucket) do
+            if w:sub(1, #prefix) == prefix or (#prefix > 0 and w:sub(1, 1) == prefix:sub(1, 1)) then
                 local added = checkWord(w)
-                if added and #exacts >= 40 then break end
+                if added and #exacts >= MAX_RESULTS then break end
+            end
+            -- Early exit if we've passed where words could be
+            if #prefix > 0 and w:sub(1, 1) > prefix:sub(1, 1) then
+                break
             end
         end
         
@@ -2022,7 +2015,7 @@ UpdateList = function(detectedText, requiredLetter)
         if #fe > 0 then exacts = fe end
     end
 
-    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 40 then
+    if (suffixMode ~= "" or lengthMode > 0) and #exacts < 100 then
         local alreadyIn = {}
         for _, w in ipairs(exacts) do alreadyIn[w] = true end
         local padding = {}
@@ -2045,9 +2038,9 @@ UpdateList = function(detectedText, requiredLetter)
 
     if #exacts > 0 then
         matches = exacts
-        if #matches > 40 then
+        if #matches > 100 then
             local trimmed = {}
-            for i = 1, 40 do
+            for i = 1, 100 do
                 table.insert(trimmed, matches[i])
             end
             matches = trimmed
@@ -2089,7 +2082,7 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        -- FAST STRATEGIC SORT (finds best 40)
+        -- FAST STRATEGIC SORT (finds best 100)
         if sortMode == "Strategic" then
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
             
@@ -2135,7 +2128,7 @@ UpdateList = function(detectedText, requiredLetter)
             end
             
             local limited = {}
-            for i = 1, math.min(40, #sorted) do
+            for i = 1, math.min(100, #sorted) do
                 table.insert(limited, sorted[i])
             end
             filtered = limited
@@ -2187,7 +2180,7 @@ UpdateList = function(detectedText, requiredLetter)
             end
             
             local limited = {}
-            for i = 1, math.min(40, #sorted) do
+            for i = 1, math.min(100, #sorted) do
                 table.insert(limited, sorted[i])
             end
             filtered = limited
@@ -2263,10 +2256,10 @@ UpdateList = function(detectedText, requiredLetter)
                 end
             end
             
-            -- Final limit to 40 total words
-            if #smartResult > 40 then
+            -- Final limit to 100 total words
+            if #smartResult > 100 then
                 local final = {}
-                for i = 1, 40 do
+                for i = 1, 100 do
                     table.insert(final, smartResult[i])
                 end
                 filtered = final
@@ -2275,14 +2268,14 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        -- Padding always by length (limited to 40)
+        -- Padding always by length (limited to 100)
         table.sort(padding, function(a, b)
             if #a ~= #b then return #a < #b end
             return false
         end)
-        if #padding > 40 then
+        if #padding > 100 then
             local limitedPadding = {}
-            for i = 1, 40 do
+            for i = 1, 100 do
                 table.insert(limitedPadding, padding[i])
             end
             padding = limitedPadding
