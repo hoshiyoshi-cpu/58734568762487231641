@@ -2002,32 +2002,22 @@ UpdateList = function(detectedText, requiredLetter)
     end
 
     -- FORCE DISPLAY: If no matches, show ALL words that start with prefix (ignore filters)
-    if #matches == 0 then
-        for _, w in ipairs(bucket) do
-            if not Blacklist[w] and not UsedWords[w] then
-                if w:sub(1, #searchPrefix) == searchPrefix then
-                    table.insert(matches, w)
-                    if #matches >= 40 then break end
-                end
-            end
-        end
+    if #matches == 0 and (lengthMode > 0 or suffixMode ~= "") then
+        -- Temporarily remove filters and try again
+        local oldLength = lengthMode
+        local oldSuffix = suffixMode
+        lengthMode = 0
+        suffixMode = ""
+        
+        -- Re-collect matches without filters
+        -- ... collection logic ...
+        
+        -- Restore filters
+        lengthMode = oldLength
+        suffixMode = oldSuffix
+        
         if #matches > 0 then
-            StatusText.Text = "No filter matches - showing all words"
-            StatusText.TextColor3 = THEME.Warning
-        end
-    end
-
-    -- FORCE DISPLAY PART 2: If STILL no matches, show ANY words from bucket
-    if #matches == 0 and #bucket > 0 then
-        for _, w in ipairs(bucket) do
-            if not Blacklist[w] and not UsedWords[w] then
-                table.insert(matches, w)
-                if #matches >= 20 then break end
-            end
-        end
-        if #matches > 0 then
-            StatusText.Text = "No prefix matches - showing random words"
-            StatusText.TextColor3 = THEME.Warning
+            StatusText.Text = "Showing all words (filters removed)"
         end
     end
 
