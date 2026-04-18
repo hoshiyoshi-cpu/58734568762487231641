@@ -475,7 +475,6 @@ LoadList(fileName)
 
 if LoadingGui then LoadingGui:Destroy() end
 
-table.sort(Words)
 Buckets = {}
 for _, w in ipairs(Words) do
     local c = w:sub(1,1) or ""
