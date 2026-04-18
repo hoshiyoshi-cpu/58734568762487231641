@@ -2610,7 +2610,7 @@ runConn = RunService.Heartbeat:Connect(function()
                     listUpdatePending = true
                     lastInputTime = 0
                     forceUpdateList = false
-                else    
+                else
                     listUpdatePending = true
                     lastInputTime = now
                 end
