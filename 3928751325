@@ -2094,6 +2094,7 @@ UpdateList = function(detectedText, requiredLetter)
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
             
         elseif sortMode == "Shortest" then
+            -- Filter by custom prefixes
             local customFiltered = {}
             if Config.CustomWords and #Config.CustomWords > 0 then
                 for _, word in ipairs(filtered) do
@@ -2108,25 +2109,26 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            -- Group by length while preserving original order from gives.txt
+            -- Group by length while preserving the ORIGINAL ORDER from the list
+            -- (no alphabetical sorting within groups!)
             local lengthGroups = {}
-            local lengthOrder = {}
+            local orderTracker = {}  -- Track insertion order of lengths
             
             for _, word in ipairs(customFiltered) do
                 local len = #word
                 if not lengthGroups[len] then
                     lengthGroups[len] = {}
-                    table.insert(lengthOrder, len)
+                    table.insert(orderTracker, len)  -- Remember when we first see this length
                 end
-                table.insert(lengthGroups[len], word)  -- Preserves original order
+                table.insert(lengthGroups[len], word)  -- Insert in original order
             end
             
-            -- Sort lengths (shortest first)
-            table.sort(lengthOrder)
+            -- Sort the lengths themselves numerically
+            table.sort(orderTracker)
             
-            -- Build result: shortest first, but words within same length keep original order
+            -- Rebuild sorted by length (shortest to longest, preserving original order within each length)
             local sorted = {}
-            for _, len in ipairs(lengthOrder) do
+            for _, len in ipairs(orderTracker) do
                 for _, word in ipairs(lengthGroups[len]) do
                     table.insert(sorted, word)
                 end
@@ -2139,6 +2141,7 @@ UpdateList = function(detectedText, requiredLetter)
             filtered = limited
             
         elseif sortMode == "Random" then
+            -- Filter by custom prefixes
             local customFiltered = {}
             if Config.CustomWords and #Config.CustomWords > 0 then
                 for _, word in ipairs(filtered) do
@@ -2153,44 +2156,44 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            -- Group by length while preserving original order
+            -- FIRST: Shuffle the entire list randomly
+            for i = #customFiltered, 2, -1 do
+                local j = math.random(i)
+                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
+            end
+            
+            -- THEN: Group by length while preserving the shuffled order
             local lengthGroups = {}
-            local lengthOrder = {}
+            local orderTracker = {}
             
             for _, word in ipairs(customFiltered) do
                 local len = #word
                 if not lengthGroups[len] then
                     lengthGroups[len] = {}
-                    table.insert(lengthOrder, len)
+                    table.insert(orderTracker, len)
                 end
                 table.insert(lengthGroups[len], word)
             end
             
-            -- Sort lengths (shortest first)
-            table.sort(lengthOrder)
+            -- Sort lengths numerically
+            table.sort(orderTracker)
             
-            -- Build result: shortest first, but SHUFFLE within each length group
-            local result = {}
-            for _, len in ipairs(lengthOrder) do
-                local group = lengthGroups[len]
-                -- Shuffle this length group
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-                -- Add shuffled group to result
-                for _, word in ipairs(group) do
-                    table.insert(result, word)
+            -- Rebuild sorted by length (shortest first, preserving shuffled order within each length)
+            local sorted = {}
+            for _, len in ipairs(orderTracker) do
+                for _, word in ipairs(lengthGroups[len]) do
+                    table.insert(sorted, word)
                 end
             end
             
             local limited = {}
-            for i = 1, math.min(40, #result) do
-                table.insert(limited, result[i])
+            for i = 1, math.min(40, #sorted) do
+                table.insert(limited, sorted[i])
             end
             filtered = limited
             
         elseif sortMode == "Smart" then
+            -- Filter by custom prefixes
             local customFiltered = {}
             if Config.CustomWords and #Config.CustomWords > 0 then
                 for _, word in ipairs(filtered) do
@@ -2205,67 +2208,85 @@ UpdateList = function(detectedText, requiredLetter)
                 customFiltered = filtered
             end
             
-            -- Group by length while preserving original order
-            local lengthGroups = {}
-            local lengthOrder = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(lengthOrder, len)
-                end
-                table.insert(lengthGroups[len], word)
+            -- SHUFFLE THE ENTIRE LIST FIRST
+            for i = #customFiltered, 2, -1 do
+                local j = math.random(i)
+                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
             end
             
-            -- Sort lengths (shortest first)
-            table.sort(lengthOrder)
-            
-            -- Build initial list sorted by length (preserving original order within lengths)
-            local sortedByLength = {}
-            for _, len in ipairs(lengthOrder) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sortedByLength, word)
-                end
-            end
-            
-            -- Separate short words (≤6 letters) from long words
+            -- Separate short words (6 letters or less) from long words
             local SHORT_THRESHOLD = 6
             local shortWords = {}
             local longWords = {}
             
-            for _, word in ipairs(sortedByLength) do
+            for _, word in ipairs(customFiltered) do
                 if #word <= SHORT_THRESHOLD then
-                    table.insert(shortWords, word)  -- Preserves original order
+                    table.insert(shortWords, word)
                 else
                     table.insert(longWords, word)
                 end
             end
             
-            -- Shuffle only the long words
-            for i = #longWords, 2, -1 do
-                local j = math.random(i)
-                longWords[i], longWords[j] = longWords[j], longWords[i]
-            end
+            local smartResult = {}
             
-            -- Combine: short words first (original order), then shuffled long words
-            local finalResult = {}
+            -- Group short words by length (preserving shuffled order)
+            local lengthGroups = {}
+            local orderTracker = {}
+            
             for _, word in ipairs(shortWords) do
-                table.insert(finalResult, word)
-            end
-            for _, word in ipairs(longWords) do
-                table.insert(finalResult, word)
+                local len = #word
+                if not lengthGroups[len] then
+                    lengthGroups[len] = {}
+                    table.insert(orderTracker, len)
+                end
+                table.insert(lengthGroups[len], word)
             end
             
-            if #finalResult > 40 then
-                local limited = {}
-                for i = 1, 40 do
-                    table.insert(limited, finalResult[i])
+            -- Sort lengths numerically
+            table.sort(orderTracker)
+            
+            -- Add short words sorted by length (shortest first), preserving shuffled order within same length
+            for _, len in ipairs(orderTracker) do
+                for _, word in ipairs(lengthGroups[len]) do
+                    table.insert(smartResult, word)
                 end
-                filtered = limited
-            else
-                filtered = finalResult
             end
+            
+            -- Shuffle long words and add them
+            if #longWords > 0 then
+                for i = #longWords, 2, -1 do
+                    local j = math.random(i)
+                    longWords[i], longWords[j] = longWords[j], longWords[i]
+                end
+                for i = 1, math.min(30, #longWords) do
+                    table.insert(smartResult, longWords[i])
+                end
+            end
+            
+            -- Final limit to 40 total words
+            if #smartResult > 40 then
+                local final = {}
+                for i = 1, 40 do
+                    table.insert(final, smartResult[i])
+                end
+                filtered = final
+            else
+                filtered = smartResult
+            end
+        end
+        
+        -- Padding always by length (limited to 40)
+        table.sort(padding, function(a, b)
+            if #a ~= #b then return #a < #b end
+            return false
+        end)
+        if #padding > 40 then
+            local limitedPadding = {}
+            for i = 1, 40 do
+                table.insert(limitedPadding, padding[i])
+            end
+            padding = limitedPadding
+        end
     
         matches = {}
         for _, w in ipairs(filtered) do table.insert(matches, w) end
