@@ -40,7 +40,7 @@ local function ColorToRGB(c)
     return string.format("%d,%d,%d", math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
 end
 
-local ConfigFile = "WordHelper_Config.json"
+local ConfigFile = "Yoshi_WordHelper_Config.json"
 local Config = {
     SortMode = "Strategic",
     SuffixMode = "",
