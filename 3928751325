@@ -901,8 +901,8 @@ Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
 local UsedWordsFrame = Instance.new("Frame", ScreenGui)
 UsedWordsFrame.Name = "UsedWordsFrame"
-UsedWordsFrame.Size = UDim2.new(0, 300, 0, 400)
-UsedWordsFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+UsedWordsFrame.Size = UDim2.new(0, 350, 0, 450)
+UsedWordsFrame.Position = UDim2.new(0.5, -175, 0.5, -225)
 UsedWordsFrame.BackgroundColor3 = THEME.Background
 UsedWordsFrame.Visible = false
 UsedWordsFrame.ClipsDescendants = true
@@ -914,7 +914,7 @@ UWStroke.Transparency = 0.5
 UWStroke.Thickness = 2
 
 local UWHeader = Instance.new("TextLabel", UsedWordsFrame)
-UWHeader.Text = "Used Words"
+UWHeader.Text = "Used Words Manager"
 UWHeader.Font = Enum.Font.GothamBold
 UWHeader.TextSize = 16
 UWHeader.TextColor3 = THEME.Text
@@ -1031,7 +1031,7 @@ RefreshUsedWords = function()
         local w = entry.word
         i = i + 1
         local row = Instance.new("Frame", UWList)
-        row.Size = UDim2.new(1, -6, 0, 22)
+        row.Size = UDim2.new(1, -6, 0, 28)
         row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
         row.BorderSizePixel = 0
         row.LayoutOrder = i
@@ -1042,24 +1042,51 @@ RefreshUsedWords = function()
         lbl.Font = Enum.Font.Gotham
         lbl.TextSize = 12
         lbl.TextColor3 = THEME.Success
-        lbl.Size = UDim2.new(1, -10, 1, 0)
+        lbl.Size = UDim2.new(1, -75, 1, 0)
         lbl.Position = UDim2.new(0, 5, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.TextXAlignment = Enum.TextXAlignment.Left
         
+        -- Remove from used button
         local del = Instance.new("TextButton", row)
-        del.Text = "X"
+        del.Text = "✕"
         del.Font = Enum.Font.GothamBold
-        del.TextSize = 11
+        del.TextSize = 14
         del.TextColor3 = Color3.fromRGB(255, 80, 80)
-        del.Size = UDim2.new(0, 22, 1, 0)
-        del.Position = UDim2.new(1, -22, 0, 0)
-        del.BackgroundTransparency = 1
+        del.Size = UDim2.new(0, 30, 1, -4)
+        del.Position = UDim2.new(1, -35, 0, 2)
+        del.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+        del.BackgroundTransparency = 0.3
+        Instance.new("UICorner", del).CornerRadius = UDim.new(0, 4)
         del.MouseButton1Click:Connect(function()
             UsedWords[w] = nil
             ShowToast("Removed from used: " .. w, "warning")
             RefreshUsedWords()
             forceUpdateList = true
+        end)
+        
+        -- Blacklist button (add to blacklist)
+        local blBtn = Instance.new("TextButton", row)
+        blBtn.Text = "🚫"
+        blBtn.Font = Enum.Font.GothamBold
+        blBtn.TextSize = 14
+        blBtn.TextColor3 = THEME.Warning
+        blBtn.Size = UDim2.new(0, 30, 1, -4)
+        blBtn.Position = UDim2.new(1, -68, 0, 2)
+        blBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+        blBtn.BackgroundTransparency = 0.3
+        Instance.new("UICorner", blBtn).CornerRadius = UDim.new(0, 4)
+        blBtn.MouseButton1Click:Connect(function()
+            if not Blacklist[w] then
+                Blacklist[w] = true
+                UsedWords[w] = nil
+                SaveConfig()
+                ShowToast("Blacklisted: " .. w .. " (won't appear again)", "warning")
+                RefreshUsedWords()
+                forceUpdateList = true
+            else
+                ShowToast("Already blacklisted!", "error")
+            end
         end)
         
         if query ~= "" and w:find(query, 1, true) then
@@ -1071,21 +1098,40 @@ RefreshUsedWords = function()
     for _, w in ipairs(blacklistedList) do
         i = i + 1
         local row = Instance.new("Frame", UWList)
-        row.Size = UDim2.new(1, -6, 0, 22)
+        row.Size = UDim2.new(1, -6, 0, 28)
         row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
         row.BorderSizePixel = 0
         row.LayoutOrder = i
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
         
         local lbl = Instance.new("TextLabel", row)
-        lbl.Text = w .. " (blacklisted)"
+        lbl.Text = w
         lbl.Font = Enum.Font.Gotham
         lbl.TextSize = 12
         lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
-        lbl.Size = UDim2.new(1, -10, 1, 0)
+        lbl.Size = UDim2.new(1, -45, 1, 0)
         lbl.Position = UDim2.new(0, 5, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.TextXAlignment = Enum.TextXAlignment.Left
+        
+        -- Unblacklist button (remove from blacklist)
+        local unblBtn = Instance.new("TextButton", row)
+        unblBtn.Text = "✓"
+        unblBtn.Font = Enum.Font.GothamBold
+        unblBtn.TextSize = 16
+        unblBtn.TextColor3 = THEME.Success
+        unblBtn.Size = UDim2.new(0, 30, 1, -4)
+        unblBtn.Position = UDim2.new(1, -35, 0, 2)
+        unblBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+        unblBtn.BackgroundTransparency = 0.3
+        Instance.new("UICorner", unblBtn).CornerRadius = UDim.new(0, 4)
+        unblBtn.MouseButton1Click:Connect(function()
+            Blacklist[w] = nil
+            SaveConfig()
+            ShowToast("Removed from blacklist: " .. w, "success")
+            RefreshUsedWords()
+            forceUpdateList = true
+        end)
         
         if query ~= "" and w:find(query, 1, true) then
             row.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
@@ -1095,7 +1141,7 @@ RefreshUsedWords = function()
     
     UWList.CanvasSize = UDim2.new(0, 0, 0, UWLayout.AbsoluteContentSize.Y)
     if scrollTarget then
-        UWList.CanvasPosition = Vector2.new(0, math.max(0, (scrollTarget - 1) * 24 - 50))
+        UWList.CanvasPosition = Vector2.new(0, math.max(0, (scrollTarget - 1) * 30 - 50))
     end
 end
 
