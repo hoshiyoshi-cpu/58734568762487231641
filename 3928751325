@@ -1,6 +1,7 @@
 --[[
     YOSHI - Word Helper with Discord Bot Strategy
     Sorts words by strategic value (best moves first)
+    Local Blacklist with Auto-Save - Persists across injections
 --]]
 
 local HttpService = game:GetService("HttpService")
@@ -40,7 +41,9 @@ local function ColorToRGB(c)
     return string.format("%d,%d,%d", math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
 end
 
-local ConfigFile = "Yoshi_WordHelper_Config.json"
+local ConfigFile = "Yoshi_Config.json"
+local BlacklistFile = "Yoshi_Blacklist.json"
+
 local Config = {
     SortMode = "Strategic",
     SuffixMode = "",
@@ -66,50 +69,101 @@ local function LoadConfig()
 end
 LoadConfig()
 
-if not Config.SuffixModes then Config.SuffixModes = {} end
-if Config.SuffixMode and Config.SuffixMode ~= "" and #Config.SuffixModes == 0 then
-    for part in Config.SuffixMode:gmatch("[^,]+") do
-        local clean = part:gsub("[%s%c]+", "")
-        if #clean > 0 then table.insert(Config.SuffixModes, clean) end
+-- =============================================
+-- LOCAL BLACKLIST SYSTEM (Persists across injections)
+-- =============================================
+local Blacklist = {}
+
+-- Load blacklist from file
+local function LoadBlacklist()
+    if isfile and isfile(BlacklistFile) then
+        local success, data = pcall(function() 
+            return HttpService:JSONDecode(readfile(BlacklistFile)) 
+        end)
+        if success and data then
+            for _, word in ipairs(data) do
+                Blacklist[word] = true
+            end
+            print("Loaded " .. tostring(#data) .. " blacklisted words")
+        end
     end
 end
 
-local sortMode = Config.SortMode
-local suffixMode = Config.SuffixMode or ""
-local lengthMode = Config.LengthMode or 0
-
-local isTyping = false
-local runConn = nil
-local inputConn = nil
-local logConn = nil
-local lastManualInput = ""
-local lastWasMyTurn = false
-local unloaded = false
-local isMyTurnLogDetected = false
-local logRequiredLetters = ""
-local turnExpiryTime = 0
-local Blacklist = {}
-local UsedWords = {}
-local lastDetected = "---"
-local UpdateList
-local ButtonCache = {}
-local ButtonData = {}
-local listUpdatePending = false
-local forceUpdateList = false
-local lastInputTime = 0
-local LIST_DEBOUNCE = 0.12
-local currentBestMatch = nil
-local lastUpdateHash = ""
-
-if logConn then logConn:Disconnect() end
-logConn = LogService.MessageOut:Connect(function(message, type)
-    local wordPart, timePart = message:match("Word:%s*([A-Za-z]+)%s+Time to respond:%s*(%d+)")
-    if wordPart and timePart then
-        isMyTurnLogDetected = true
-        logRequiredLetters = wordPart
-        turnExpiryTime = tick() + tonumber(timePart)
+-- Save blacklist to file
+local function SaveBlacklist()
+    if writefile then
+        local list = {}
+        for word, _ in pairs(Blacklist) do
+            table.insert(list, word)
+        end
+        table.sort(list)
+        writefile(BlacklistFile, HttpService:JSONEncode(list))
+        print("Saved " .. tostring(#list) .. " blacklisted words")
     end
-end)
+end
+
+-- Add word to blacklist (permanent)
+local function AddToBlacklist(word)
+    local w = word:lower()
+    if not Blacklist[w] then
+        Blacklist[w] = true
+        SaveBlacklist()
+        return true
+    end
+    return false
+end
+
+-- Remove word from blacklist
+local function RemoveFromBlacklist(word)
+    local w = word:lower()
+    if Blacklist[w] then
+        Blacklist[w] = nil
+        SaveBlacklist()
+        return true
+    end
+    return false
+end
+
+-- Check if word is blacklisted
+local function IsBlacklisted(word)
+    return Blacklist[word:lower()] == true
+end
+
+-- Load blacklist on startup
+LoadBlacklist()
+
+-- =============================================
+-- LOOKUP FUNCTIONS
+-- =============================================
+
+local GiveWordsLookup = {}
+local function RefreshGiveWordsLookup()
+    local lookup = {}
+    if Config.GiveWords then
+        for i = 1, #Config.GiveWords do
+            lookup[Config.GiveWords[i]] = true
+        end
+    end
+    GiveWordsLookup = lookup
+end
+
+local TrapPrefixesLookup = {}
+local function RefreshTrapLookup()
+    local lookup = {}
+    if Config.TrapPrefixes then
+        for i = 1, #Config.TrapPrefixes do
+            lookup[Config.TrapPrefixes[i]] = true
+        end
+    end
+    TrapPrefixesLookup = lookup
+end
+
+RefreshGiveWordsLookup()
+RefreshTrapLookup()
+
+-- =============================================
+-- FETCH FUNCTIONS
+-- =============================================
 
 local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
@@ -157,39 +211,6 @@ local function UpdateStatus(text, color)
     if color then LoadingStatus.TextColor3 = color end
     game:GetService("RunService").RenderStepped:Wait()
 end
-
--- =============================================
--- LOOKUP FUNCTIONS
--- =============================================
-
-local GiveWordsLookup = {}
-local function RefreshGiveWordsLookup()
-    local lookup = {}
-    if Config.GiveWords then
-        for i = 1, #Config.GiveWords do
-            lookup[Config.GiveWords[i]] = true
-        end
-    end
-    GiveWordsLookup = lookup
-end
-
-local TrapPrefixesLookup = {}
-local function RefreshTrapLookup()
-    local lookup = {}
-    if Config.TrapPrefixes then
-        for i = 1, #Config.TrapPrefixes do
-            lookup[Config.TrapPrefixes[i]] = true
-        end
-    end
-    TrapPrefixesLookup = lookup
-end
-
-RefreshGiveWordsLookup()
-RefreshTrapLookup()
-
--- =============================================
--- FETCH FUNCTIONS
--- =============================================
 
 local function FetchWords()
     UpdateStatus("Fetching latest word list...", THEME.Warning)
@@ -256,11 +277,9 @@ local SeenWords = {}
 
 local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     local giveWordsLookup = GiveWordsLookup
-    local SHORT_THRESHOLD = 5
     local MAX_WORDS = 40
     
-    local priorityWords = {}
-    local shortWords = {}
+    local giveWords = {}
     local otherWords = {}
     
     local wordData = {}
@@ -278,143 +297,56 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     for i = 1, #wordData do
         local data = wordData[i]
         if data.isGive then
-            priorityWords[#priorityWords + 1] = data
-        elseif data.len <= SHORT_THRESHOLD then
-            shortWords[#shortWords + 1] = data
+            table.insert(giveWords, data)
         else
-            otherWords[#otherWords + 1] = data
+            table.insert(otherWords, data)
         end
     end
     
-    local function shuffle(t)
-        local n = #t
-        for i = n, 2, -1 do
-            local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
-        end
-        return t
-    end
+    table.sort(giveWords, function(a, b) return a.len < b.len end)
+    table.sort(otherWords, function(a, b) return a.len < b.len end)
     
-    local function sortByLength(a, b)
-        return a.len < b.len
-    end
-    
-    local function limitTo40(arr)
-        local n = #arr
-        if n > MAX_WORDS then
-            local limited = {}
-            for i = 1, MAX_WORDS do
-                limited[i] = arr[i]
+    local function randomizeWithinLengths(arr)
+        local lengthGroups = {}
+        local order = {}
+        
+        for _, data in ipairs(arr) do
+            if not lengthGroups[data.len] then
+                lengthGroups[data.len] = {}
+                table.insert(order, data.len)
             end
-            return limited
+            table.insert(lengthGroups[data.len], data)
         end
-        return arr
+        
+        table.sort(order)
+        
+        local result = {}
+        for _, len in ipairs(order) do
+            local group = lengthGroups[len]
+            for i = #group, 2, -1 do
+                local j = math.random(i)
+                group[i], group[j] = group[j], group[i]
+            end
+            for _, data in ipairs(group) do
+                table.insert(result, data)
+            end
+        end
+        return result
     end
     
-    table.sort(priorityWords, sortByLength)
-    table.sort(shortWords, sortByLength)
-    table.sort(otherWords, sortByLength)
+    giveWords = randomizeWithinLengths(giveWords)
+    otherWords = randomizeWithinLengths(otherWords)
     
-    priorityWords = shuffle(limitTo40(priorityWords))
-    shortWords = shuffle(limitTo40(shortWords))
-    otherWords = shuffle(limitTo40(otherWords))
-    
-    local totalCount = #priorityWords + #shortWords + #otherWords
-    local finalCount = totalCount > MAX_WORDS and MAX_WORDS or totalCount
     local result = {}
-    local idx = 1
     
-    for i = 1, #priorityWords do
-        result[idx] = priorityWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
-    end
-    
-    for i = 1, #shortWords do
-        result[idx] = shortWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+    for i = 1, #giveWords do
+        if #result >= MAX_WORDS then break end
+        table.insert(result, giveWords[i].word)
     end
     
     for i = 1, #otherWords do
-        result[idx] = otherWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
-    end
-    
-    return result
-end
-
-local function SmartSort(wordList, currentPrefix, usedWordsSet)
-    local customFiltered = {}
-    if Config.CustomWords and #Config.CustomWords > 0 then
-        for _, word in ipairs(wordList) do
-            for _, customPrefix in ipairs(Config.CustomWords) do
-                if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                    table.insert(customFiltered, word)
-                    break
-                end
-            end
-        end
-    else
-        customFiltered = wordList
-    end
-    
-    local SHORT_THRESHOLD = 6
-    local shortWords = {}
-    local longWords = {}
-    
-    for _, word in ipairs(customFiltered) do
-        if #word <= SHORT_THRESHOLD then
-            table.insert(shortWords, word)
-        else
-            table.insert(longWords, word)
-        end
-    end
-    
-    local result = {}
-    
-    local lengthGroups = {}
-    for _, word in ipairs(shortWords) do
-        local len = #word
-        if not lengthGroups[len] then
-            lengthGroups[len] = {}
-        end
-        table.insert(lengthGroups[len], word)
-    end
-    
-    for len, group in pairs(lengthGroups) do
-        for i = #group, 2, -1 do
-            local j = math.random(i)
-            group[i], group[j] = group[j], group[i]
-        end
-    end
-    
-    for len = 1, SHORT_THRESHOLD do
-        if lengthGroups[len] then
-            for _, word in ipairs(lengthGroups[len]) do
-                table.insert(result, word)
-            end
-        end
-    end
-    
-    if #longWords > 0 then
-        for i = #longWords, 2, -1 do
-            local j = math.random(i)
-            longWords[i], longWords[j] = longWords[j], longWords[i]
-        end
-        
-        for i = 1, math.min(30, #longWords) do
-            table.insert(result, longWords[i])
-        end
-    end
-    
-    if #result > 40 then
-        local final = {}
-        for i = 1, 40 do
-            table.insert(final, result[i])
-        end
-        return final
+        if #result >= MAX_WORDS then break end
+        table.insert(result, otherWords[i].word)
     end
     
     return result
@@ -426,7 +358,7 @@ local function LoadList(fname)
         local content = readfile(fname)
         for w in content:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
-            if #clean > 0 and not SeenWords[clean] then
+            if #clean > 0 and not SeenWords[clean] and not IsBlacklisted(clean) then
                 SeenWords[clean] = true
                 table.insert(Words, clean)
             end
@@ -442,19 +374,20 @@ LoadList(fileName)
 
 if LoadingGui then LoadingGui:Destroy() end
 
--- NO table.sort(Words) - Keep scrambled order!
 Buckets = {}
 for _, w in ipairs(Words) do
-    local c = w:sub(1,1) or ""
-    if c == "" then c = "#" end
-    Buckets[c] = Buckets[c] or {}
-    table.insert(Buckets[c], w)
+    if not IsBlacklisted(w) then
+        local c = w:sub(1,1) or ""
+        if c == "" then c = "#" end
+        Buckets[c] = Buckets[c] or {}
+        table.insert(Buckets[c], w)
+    end
 end
 
 if Config.CustomWords then
     for _, w in ipairs(Config.CustomWords) do
         local clean = w:gsub("[%s%c]+", ""):lower()
-        if #clean > 0 and not SeenWords[clean] then
+        if #clean > 0 and not SeenWords[clean] and not IsBlacklisted(clean) then
             SeenWords[clean] = true
             table.insert(Words, clean)
             local c = clean:sub(1,1) or ""
@@ -468,7 +401,7 @@ end
 SeenWords = nil
 
 -- =============================================
--- UI SETUP (keeping your existing UI code)
+-- UI SETUP
 -- =============================================
 
 local function Tween(obj, props, time)
@@ -519,14 +452,6 @@ local function GetCurrentGameWord(providedFrame)
 end
 
 local function GetTurnInfo(providedFrame)
-    if isMyTurnLogDetected then
-        if tick() < turnExpiryTime then
-            return true, logRequiredLetters
-        else
-            isMyTurnLogDetected = false
-        end
-    end
-
     local frame = providedFrame
     if not frame then
         local player = Players.LocalPlayer
@@ -693,13 +618,9 @@ CloseBtn.Size = UDim2.new(0, 45, 1, 0)
 CloseBtn.Position = UDim2.new(1, -45, 0, 0)
 CloseBtn.BackgroundTransparency = 1
 
+local unloaded = false
 CloseBtn.MouseButton1Click:Connect(function()
     unloaded = true
-    if runConn then runConn:Disconnect() runConn = nil end
-    if inputConn then inputConn:Disconnect() inputConn = nil end
-    if logConn then logConn:Disconnect() logConn = nil end
-    for _, btn in ipairs(ButtonCache) do btn:Destroy() end
-    table.clear(ButtonCache)
     if ScreenGui and ScreenGui.Parent then ScreenGui:Destroy() end
 end)
 
@@ -742,10 +663,6 @@ SearchBox.PlaceholderText = "Search words..."
 SearchBox.PlaceholderColor3 = THEME.SubText
 SearchBox.Text = ""
 SearchBox.TextXAlignment = Enum.TextXAlignment.Left
-
-SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-    if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
-end)
 
 local ScrollList = Instance.new("ScrollingFrame", MainFrame)
 ScrollList.Size = UDim2.new(1, -10, 1, -175)
@@ -801,6 +718,7 @@ ExpandBtn.MouseButton1Click:Connect(function()
     UpdateLayout()
 end)
 
+local sortMode = Config.SortMode
 local function CreateToggle(text, pos, size, callback)
     local btn = Instance.new("TextButton", TogglesFrame)
     btn.Text = text
@@ -831,11 +749,8 @@ local SortBtn = CreateToggle("Sort: "..sortMode, UDim2.new(0, 15, 0, 5), UDim2.n
         sortMode = "Shortest"
     end
     Config.SortMode = sortMode
-    lastDetected = "---"
-    forceUpdateList = true
     return true, "Sort: "..sortMode, THEME.Accent
 end)
-    
 SortBtn.TextColor3 = THEME.Accent
 
 local ResetUsedBtn = Instance.new("TextButton", TogglesFrame)
@@ -896,8 +811,17 @@ ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 65)
 Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
 -- =============================================
--- USED WORDS FRAME (simplified - keeping your existing code)
+-- USED WORDS FRAME (Blacklist buttons here)
 -- =============================================
+
+local UsedWords = {}
+local lastDetected = ""
+local lastRequiredLetter = ""
+local forceUpdateList = false
+local lastManualInput = ""
+local UpdateList
+local ButtonCache = {}
+local ButtonData = {}
 
 local UsedWordsFrame = Instance.new("Frame", ScreenGui)
 UsedWordsFrame.Name = "UsedWordsFrame"
@@ -931,34 +855,13 @@ UWClose.Position = UDim2.new(1, -40, 0, 0)
 UWClose.BackgroundTransparency = 1
 UWClose.MouseButton1Click:Connect(function() UsedWordsFrame.Visible = false end)
 
-local UWCopyBtn = Instance.new("TextButton", UsedWordsFrame)
-UWCopyBtn.Text = "Copy All"
-UWCopyBtn.Font = Enum.Font.GothamBold
-UWCopyBtn.TextSize = 13
-UWCopyBtn.TextColor3 = THEME.Accent
-UWCopyBtn.BackgroundColor3 = THEME.ItemBG
-UWCopyBtn.Size = UDim2.new(0, 80, 0, 28)
-UWCopyBtn.Position = UDim2.new(0, 10, 1, -38)
-Instance.new("UICorner", UWCopyBtn).CornerRadius = UDim.new(0, 6)
-UWCopyBtn.MouseButton1Click:Connect(function()
-    local lines = {}
-    for w, t in pairs(UsedWords) do table.insert(lines, {word = w, time = t}) end
-    table.sort(lines, function(a, b) return a.time > b.time end)
-    local result = {}
-    for _, entry in ipairs(lines) do table.insert(result, entry.word) end
-    setclipboard(table.concat(result, "\n"))
-    UWCopyBtn.Text = "Copied!"
-    UWCopyBtn.TextColor3 = THEME.Success
-    task.delay(2, function() UWCopyBtn.Text = "Copy All" UWCopyBtn.TextColor3 = THEME.Accent end)
-end)
-
 local UWSearchBox = Instance.new("TextBox", UsedWordsFrame)
 UWSearchBox.Font = Enum.Font.Gotham
 UWSearchBox.TextSize = 12
 UWSearchBox.BackgroundColor3 = THEME.ItemBG
 UWSearchBox.Size = UDim2.new(1, -20, 0, 24)
 UWSearchBox.Position = UDim2.new(0, 10, 0, 45)
-UWSearchBox.PlaceholderText = "Search used words..."
+UWSearchBox.PlaceholderText = "Search words..."
 UWSearchBox.PlaceholderColor3 = THEME.SubText
 UWSearchBox.TextColor3 = THEME.Text
 UWSearchBox.Text = ""
@@ -973,10 +876,9 @@ UWCountLabel.Size = UDim2.new(1, -20, 0, 20)
 UWCountLabel.Position = UDim2.new(0, 10, 0, 75)
 UWCountLabel.BackgroundTransparency = 1
 UWCountLabel.TextXAlignment = Enum.TextXAlignment.Left
-UWCountLabel.Text = "0 used, 0 blacklisted"
 
 local UWList = Instance.new("ScrollingFrame", UsedWordsFrame)
-UWList.Size = UDim2.new(1, -20, 1, -150)
+UWList.Size = UDim2.new(1, -20, 1, -130)
 UWList.Position = UDim2.new(0, 10, 0, 100)
 UWList.BackgroundTransparency = 1
 UWList.ScrollBarThickness = 3
@@ -987,214 +889,147 @@ local UWLayout = Instance.new("UIListLayout", UWList)
 UWLayout.Padding = UDim.new(0, 2)
 UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local RefreshUsedWords
-local lastRefreshHash = ""
-
-RefreshUsedWords = function()
-    if not UsedWordsFrame.Visible then return end
-    
-    local hash = ""
-    for w, t in pairs(UsedWords) do
-        hash = hash .. w .. tostring(t)
-    end
-    for w, _ in pairs(Blacklist) do
-        hash = hash .. w .. "bl"
-    end
-    hash = hash .. (UWSearchBox.Text or "")
-    
-    if hash == lastRefreshHash then return end
-    lastRefreshHash = hash
-    
+local function RefreshUsedWordsDisplay()
     for _, c in ipairs(UWList:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
     
     local query = UWSearchBox.Text:lower():gsub("[%s%c]+", "")
     local usedList = {}
-    local blacklistedList = {}
     
     for w, t in pairs(UsedWords) do 
-        table.insert(usedList, {word = w, time = t}) 
+        if not IsBlacklisted(w) then
+            table.insert(usedList, {word = w, time = t})
+        end
     end
     table.sort(usedList, function(a, b) return a.time > b.time end)
     
+    local blacklistedList = {}
     for w, _ in pairs(Blacklist) do 
-        table.insert(blacklistedList, w) 
+        table.insert(blacklistedList, w)
     end
+    table.sort(blacklistedList)
     
     UWCountLabel.Text = #usedList .. " used, " .. #blacklistedList .. " blacklisted"
     
     local i = 0
-    local scrollTarget = nil
     
+    -- Show used words
     for _, entry in ipairs(usedList) do
         local w = entry.word
-        i = i + 1
-        local row = Instance.new("Frame", UWList)
-        row.Size = UDim2.new(1, -6, 0, 28)
-        row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
-        row.BorderSizePixel = 0
-        row.LayoutOrder = i
-        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
-        
-        local lbl = Instance.new("TextLabel", row)
-        lbl.Text = w
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 12
-        lbl.TextColor3 = THEME.Success
-        lbl.Size = UDim2.new(1, -75, 1, 0)
-        lbl.Position = UDim2.new(0, 5, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        
-        -- Remove from used button
-        local del = Instance.new("TextButton", row)
-        del.Text = "✕"
-        del.Font = Enum.Font.GothamBold
-        del.TextSize = 14
-        del.TextColor3 = Color3.fromRGB(255, 80, 80)
-        del.Size = UDim2.new(0, 30, 1, -4)
-        del.Position = UDim2.new(1, -35, 0, 2)
-        del.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-        del.BackgroundTransparency = 0.3
-        Instance.new("UICorner", del).CornerRadius = UDim.new(0, 4)
-        del.MouseButton1Click:Connect(function()
-            UsedWords[w] = nil
-            ShowToast("Removed from used: " .. w, "warning")
-            RefreshUsedWords()
-            forceUpdateList = true
-        end)
-        
-        -- Blacklist button (add to blacklist)
-        local blBtn = Instance.new("TextButton", row)
-        blBtn.Text = "🚫"
-        blBtn.Font = Enum.Font.GothamBold
-        blBtn.TextSize = 14
-        blBtn.TextColor3 = THEME.Warning
-        blBtn.Size = UDim2.new(0, 30, 1, -4)
-        blBtn.Position = UDim2.new(1, -68, 0, 2)
-        blBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-        blBtn.BackgroundTransparency = 0.3
-        Instance.new("UICorner", blBtn).CornerRadius = UDim.new(0, 4)
-        blBtn.MouseButton1Click:Connect(function()
-            if not Blacklist[w] then
-                Blacklist[w] = true
+        if query == "" or w:find(query, 1, true) then
+            i = i + 1
+            local row = Instance.new("Frame", UWList)
+            row.Size = UDim2.new(1, -6, 0, 28)
+            row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
+            row.BorderSizePixel = 0
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            
+            local lbl = Instance.new("TextLabel", row)
+            lbl.Text = w
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 12
+            lbl.TextColor3 = THEME.Success
+            lbl.Size = UDim2.new(1, -75, 1, 0)
+            lbl.Position = UDim2.new(0, 5, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            
+            -- Remove from used button
+            local del = Instance.new("TextButton", row)
+            del.Text = "✕"
+            del.Font = Enum.Font.GothamBold
+            del.TextSize = 14
+            del.TextColor3 = Color3.fromRGB(255, 80, 80)
+            del.Size = UDim2.new(0, 30, 1, -4)
+            del.Position = UDim2.new(1, -35, 0, 2)
+            del.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+            del.BackgroundTransparency = 0.3
+            Instance.new("UICorner", del).CornerRadius = UDim.new(0, 4)
+            del.MouseButton1Click:Connect(function()
                 UsedWords[w] = nil
-                SaveConfig()
-                ShowToast("Blacklisted: " .. w .. " (won't appear again)", "warning")
-                RefreshUsedWords()
+                ShowToast("Removed from used: " .. w, "warning")
+                RefreshUsedWordsDisplay()
                 forceUpdateList = true
-            else
-                ShowToast("Already blacklisted!", "error")
-            end
-        end)
-        
-        if query ~= "" and w:find(query, 1, true) then
-            row.BackgroundColor3 = Color3.fromRGB(40, 70, 40)
-            if not scrollTarget then scrollTarget = i end
+            end)
+            
+            -- Blacklist button
+            local blBtn = Instance.new("TextButton", row)
+            blBtn.Text = "🚫"
+            blBtn.Font = Enum.Font.GothamBold
+            blBtn.TextSize = 14
+            blBtn.TextColor3 = THEME.Warning
+            blBtn.Size = UDim2.new(0, 30, 1, -4)
+            blBtn.Position = UDim2.new(1, -68, 0, 2)
+            blBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+            blBtn.BackgroundTransparency = 0.3
+            Instance.new("UICorner", blBtn).CornerRadius = UDim.new(0, 4)
+            blBtn.MouseButton1Click:Connect(function()
+                if AddToBlacklist(w) then
+                    UsedWords[w] = nil
+                    ShowToast("Blacklisted: " .. w .. " (permanent)", "warning")
+                    RefreshUsedWordsDisplay()
+                    forceUpdateList = true
+                end
+            end)
         end
     end
     
+    -- Show blacklisted words
     for _, w in ipairs(blacklistedList) do
-        i = i + 1
-        local row = Instance.new("Frame", UWList)
-        row.Size = UDim2.new(1, -6, 0, 28)
-        row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
-        row.BorderSizePixel = 0
-        row.LayoutOrder = i
-        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
-        
-        local lbl = Instance.new("TextLabel", row)
-        lbl.Text = w
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 12
-        lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
-        lbl.Size = UDim2.new(1, -45, 1, 0)
-        lbl.Position = UDim2.new(0, 5, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        
-        -- Unblacklist button (remove from blacklist)
-        local unblBtn = Instance.new("TextButton", row)
-        unblBtn.Text = "✓"
-        unblBtn.Font = Enum.Font.GothamBold
-        unblBtn.TextSize = 16
-        unblBtn.TextColor3 = THEME.Success
-        unblBtn.Size = UDim2.new(0, 30, 1, -4)
-        unblBtn.Position = UDim2.new(1, -35, 0, 2)
-        unblBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-        unblBtn.BackgroundTransparency = 0.3
-        Instance.new("UICorner", unblBtn).CornerRadius = UDim.new(0, 4)
-        unblBtn.MouseButton1Click:Connect(function()
-            Blacklist[w] = nil
-            SaveConfig()
-            ShowToast("Removed from blacklist: " .. w, "success")
-            RefreshUsedWords()
-            forceUpdateList = true
-        end)
-        
-        if query ~= "" and w:find(query, 1, true) then
-            row.BackgroundColor3 = Color3.fromRGB(70, 40, 40)
-            if not scrollTarget then scrollTarget = i end
+        if query == "" or w:find(query, 1, true) then
+            i = i + 1
+            local row = Instance.new("Frame", UWList)
+            row.Size = UDim2.new(1, -6, 0, 28)
+            row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
+            row.BorderSizePixel = 0
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            
+            local lbl = Instance.new("TextLabel", row)
+            lbl.Text = w .. " (blacklisted - never appears)"
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 12
+            lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+            lbl.Size = UDim2.new(1, -45, 1, 0)
+            lbl.Position = UDim2.new(0, 5, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            
+            -- Unblacklist button
+            local unblBtn = Instance.new("TextButton", row)
+            unblBtn.Text = "✓"
+            unblBtn.Font = Enum.Font.GothamBold
+            unblBtn.TextSize = 16
+            unblBtn.TextColor3 = THEME.Success
+            unblBtn.Size = UDim2.new(0, 30, 1, -4)
+            unblBtn.Position = UDim2.new(1, -35, 0, 2)
+            unblBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+            unblBtn.BackgroundTransparency = 0.3
+            Instance.new("UICorner", unblBtn).CornerRadius = UDim.new(0, 4)
+            unblBtn.MouseButton1Click:Connect(function()
+                if RemoveFromBlacklist(w) then
+                    ShowToast("Removed from blacklist: " .. w, "success")
+                    RefreshUsedWordsDisplay()
+                    forceUpdateList = true
+                end
+            end)
         end
     end
     
     UWList.CanvasSize = UDim2.new(0, 0, 0, UWLayout.AbsoluteContentSize.Y)
-    if scrollTarget then
-        UWList.CanvasPosition = Vector2.new(0, math.max(0, (scrollTarget - 1) * 30 - 50))
-    end
 end
 
-local usedWordsChanged = false
-local function ScheduleUsedWordsRefresh()
-    if UsedWordsFrame.Visible and not usedWordsChanged then
-        usedWordsChanged = true
-        task.defer(function()
-            task.wait(0.1)
-            if UsedWordsFrame.Visible then
-                RefreshUsedWords()
-            end
-            usedWordsChanged = false
-        end)
-    end
-end
+UWSearchBox:GetPropertyChangedSignal("Text"):Connect(RefreshUsedWordsDisplay)
 
-local originalUsedWords = UsedWords
-UsedWords = setmetatable({}, {
-    __index = originalUsedWords,
-    __newindex = function(t, k, v)
-        originalUsedWords[k] = v
-        ScheduleUsedWordsRefresh()
-        forceUpdateList = true
-    end,
-    __pairs = function(t)
-        return pairs(originalUsedWords)
-    end
-})
-
-UWSearchBox:GetPropertyChangedSignal("Text"):Connect(RefreshUsedWords)
 ViewUsedBtn.MouseButton1Click:Connect(function()
     UsedWordsFrame.Visible = not UsedWordsFrame.Visible
-    UsedWordsFrame.Parent = nil
-    UsedWordsFrame.Parent = ScreenGui
     if UsedWordsFrame.Visible then 
-        lastUsedWordsRefresh = 0
-        RefreshUsedWords() 
-    end
-end)
-
-local lastUsedWordsRefresh = 0
-local usedWordsHeartbeat = RunService.Heartbeat:Connect(function()
-    if UsedWordsFrame and UsedWordsFrame.Visible then
-        if tick() - lastUsedWordsRefresh > 0.5 then
-            lastUsedWordsRefresh = tick()
-            RefreshUsedWords()
-        end
+        RefreshUsedWordsDisplay()
     end
 end)
 
 -- =============================================
--- CUSTOM WORDS FRAME (keeping your existing code)
+-- CUSTOM WORDS FRAME (simplified)
 -- =============================================
 
 local CustomWordsFrame = Instance.new("Frame", ScreenGui)
@@ -1231,8 +1066,6 @@ CWCloseBtn.MouseButton1Click:Connect(function() CustomWordsFrame.Visible = false
 
 ManageWordsBtn.MouseButton1Click:Connect(function()
     CustomWordsFrame.Visible = not CustomWordsFrame.Visible
-    CustomWordsFrame.Parent = nil
-    CustomWordsFrame.Parent = ScreenGui
 end)
 
 local function SetupPhantomBox(box, placeholder)
@@ -1286,8 +1119,7 @@ CWAddBtn.Size = UDim2.new(0, 50, 0, 24)
 CWAddBtn.Position = UDim2.new(1, -60, 1, -35)
 Instance.new("UICorner", CWAddBtn).CornerRadius = UDim.new(0, 4)
 
-local RefreshCustomWords
-RefreshCustomWords = function()
+local function RefreshCustomWords()
     for _, c in ipairs(CWScroll:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
@@ -1296,7 +1128,7 @@ RefreshCustomWords = function()
     local list = Config.CustomWords or {}
     local shownCount = 0
     for i, w in ipairs(list) do
-        if query == "" or w:find(query, 1, true) then
+        if not IsBlacklisted(w) and (query == "" or w:find(query, 1, true)) then
             shownCount = shownCount + 1
             local row = Instance.new("TextButton", CWScroll)
             row.Size = UDim2.new(1, -6, 0, 22)
@@ -1325,7 +1157,6 @@ RefreshCustomWords = function()
             del.MouseButton1Click:Connect(function()
                 table.remove(Config.CustomWords, i)
                 SaveConfig()
-                Blacklist[w] = true
                 RefreshCustomWords()
                 ShowToast("Removed: " .. w, "warning")
             end)
@@ -1368,7 +1199,7 @@ end)
 RefreshCustomWords()
 
 -- =============================================
--- SERVER BROWSER (keeping your existing code)
+-- SERVER BROWSER (simplified)
 -- =============================================
 
 local ServerFrame = Instance.new("Frame", ScreenGui)
@@ -1483,9 +1314,6 @@ local function FetchServers()
                         join.MouseButton1Click:Connect(function()
                             join.Text = "Joining..."
                             ShowToast("Teleporting...", "success")
-                            if queue_on_teleport then
-                                queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/skrylor/Last-Letter-Script/refs/heads/main/Last%20Letter.lua"))()')
-                            end
                             task.spawn(function()
                                 local success, err = pcall(function()
                                     game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, srv.id, Players.LocalPlayer)
@@ -1517,13 +1345,11 @@ end)
 SBRefresh.MouseButton1Click:Connect(FetchServers)
 ServerBrowserBtn.MouseButton1Click:Connect(function()
     ServerFrame.Visible = not ServerFrame.Visible
-    ServerFrame.Parent = nil
-    ServerFrame.Parent = ScreenGui
     if ServerFrame.Visible then FetchServers() end
 end)
 
 -- =============================================
--- WORD BROWSER - FIXED VERSION
+-- WORD BROWSER
 -- =============================================
 
 do
@@ -1602,6 +1428,9 @@ do
     WBLayout.Padding = UDim.new(0, 2)
     WBLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
+    local suffixMode = Config.SuffixMode
+    local lengthMode = Config.LengthMode
+    
     local function SearchWords()
         for _, c in ipairs(WBList:GetChildren()) do
             if c:IsA("GuiObject") and c.Name ~= "UIListLayout" then c:Destroy() end
@@ -1612,7 +1441,6 @@ do
         if eVal == "Ends with..." then eVal = "" end
         eVal = eVal:lower():gsub("[%s%c]+", "")
 
-        -- Update global suffixMode and lengthMode to affect main display
         suffixMode = eVal
         lengthMode = lVal or 0
         Config.SuffixMode = eVal
@@ -1623,14 +1451,7 @@ do
             if #clean > 0 then table.insert(Config.SuffixModes, clean) end
         end
 
-        -- Update main display
         if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
-
-        if eVal == "" and not lVal then
-            lastDetected = "---"
-            forceUpdateList = true
-            return
-        end
 
         local suffixPriority = {}
         for idx, s in ipairs(Config.SuffixModes) do
@@ -1640,9 +1461,8 @@ do
         local results = {}
         local limit = 200
 
-        -- Find words matching the suffix for the Word Browser display
         for _, w in ipairs(Words) do
-            if not Blacklist[w] and not UsedWords[w] then
+            if not IsBlacklisted(w) and not UsedWords[w] then
                 local matchLen = (lVal == nil or lVal == 0) or (#w == lVal)
                 local matchEnd = false
                 if eVal == "" then
@@ -1669,7 +1489,6 @@ do
             end
         end
 
-        -- Sort results by priority then length
         table.sort(results, function(a, b)
             if a.priority ~= b.priority then return a.priority < b.priority end
             if #a.word ~= #b.word then return #a.word < #b.word end
@@ -1711,8 +1530,6 @@ do
     WBLengthBox.FocusLost:Connect(function(enter) if enter then SearchWords() end end)
     WordBrowserBtn.MouseButton1Click:Connect(function()
         WordBrowserFrame.Visible = not WordBrowserFrame.Visible
-        WordBrowserFrame.Parent = nil
-        WordBrowserFrame.Parent = ScreenGui
     end)
 end
 
@@ -1751,13 +1568,7 @@ end
 -- MAIN WINDOW UPDATE LIST
 -- =============================================
 
-local lastRequiredLetter = ""
-
 UpdateList = function(detectedText, requiredLetter)
-    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode)
-    if hash == lastUpdateHash and not forceUpdateList then return end
-    lastUpdateHash = hash
-
     local matches = {}
     local searchPrefix = detectedText
     local isBacktracked = false
@@ -1807,7 +1618,7 @@ UpdateList = function(detectedText, requiredLetter)
                 -- skip
             elseif lengthMode > 0 and not ignoreLengthFilter and #w ~= lengthMode then
                 -- skip
-            elseif Blacklist[w] or UsedWords[w] then
+            elseif IsBlacklisted(w) or UsedWords[w] then
                 -- skip
             else
                 if w:sub(1, prefixLen) == prefix then
@@ -1856,7 +1667,7 @@ UpdateList = function(detectedText, requiredLetter)
             local fallbackBucket = (Buckets and Buckets[reqChar]) or Words
             if fallbackBucket then
                 for _, w in ipairs(fallbackBucket) do
-                    if not Blacklist[w] and not UsedWords[w] then
+                    if not IsBlacklisted(w) and not UsedWords[w] then
                         local mLen = GetMatchLength(w, requiredLetter)
                         if mLen == #requiredLetter then
                             table.insert(matches, w)
@@ -1883,177 +1694,40 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        -- Apply sort modes
         if sortMode == "Strategic" then
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            local lengthGroups = {}
-            local orderTracker = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(orderTracker)
-            
-            local sorted = {}
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sorted, word)
-                end
-            end
-            
-            local limited = {}
-            for i = 1, math.min(40, #sorted) do
-                table.insert(limited, sorted[i])
-            end
-            filtered = limited
-            
+            table.sort(filtered, function(a, b) return #a < #b end)
         elseif sortMode == "Random" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            for i = #customFiltered, 2, -1 do
+            for i = #filtered, 2, -1 do
                 local j = math.random(i)
-                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
+                filtered[i], filtered[j] = filtered[j], filtered[i]
             end
-            
-            local lengthGroups = {}
-            local orderTracker = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(orderTracker)
-            
-            local sorted = {}
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sorted, word)
-                end
-            end
-            
-            local limited = {}
-            for i = 1, math.min(40, #sorted) do
-                table.insert(limited, sorted[i])
-            end
-            filtered = limited
-            
         elseif sortMode == "Smart" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            for i = #customFiltered, 2, -1 do
-                local j = math.random(i)
-                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
-            end
-            
             local SHORT_THRESHOLD = 6
             local shortWords = {}
             local longWords = {}
-            
-            for _, word in ipairs(customFiltered) do
+            for _, word in ipairs(filtered) do
                 if #word <= SHORT_THRESHOLD then
                     table.insert(shortWords, word)
                 else
                     table.insert(longWords, word)
                 end
             end
-            
-            local smartResult = {}
-            
-            local lengthGroups = {}
-            local orderTracker = {}
-            
-            for _, word in ipairs(shortWords) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
+            for i = #shortWords, 2, -1 do
+                local j = math.random(i)
+                shortWords[i], shortWords[j] = shortWords[j], shortWords[i]
             end
-            
-            table.sort(orderTracker)
-            
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(smartResult, word)
-                end
+            for i = #longWords, 2, -1 do
+                local j = math.random(i)
+                longWords[i], longWords[j] = longWords[j], longWords[i]
             end
-            
-            if #longWords > 0 then
-                for i = #longWords, 2, -1 do
-                    local j = math.random(i)
-                    longWords[i], longWords[j] = longWords[j], longWords[i]
-                end
-                for i = 1, math.min(30, #longWords) do
-                    table.insert(smartResult, longWords[i])
-                end
-            end
-            
-            if #smartResult > 40 then
-                local final = {}
-                for i = 1, 40 do
-                    table.insert(final, smartResult[i])
-                end
-                filtered = final
-            else
-                filtered = smartResult
-            end
+            filtered = {}
+            for _, w in ipairs(shortWords) do table.insert(filtered, w) end
+            for i = 1, math.min(30, #longWords) do table.insert(filtered, longWords[i]) end
         end
         
-        table.sort(padding, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return false
-        end)
+        table.sort(padding, function(a, b) return #a < #b end)
         if #padding > 40 then
             local limitedPadding = {}
             for i = 1, 40 do
@@ -2071,12 +1745,6 @@ UpdateList = function(detectedText, requiredLetter)
     local maxDisplay = 15
     for i = 1, math.min(maxDisplay, #matches) do
         table.insert(displayList, matches[i])
-    end
-
-    if #matches > 0 and not isBacktracked then
-        currentBestMatch = matches[1]
-    else
-        currentBestMatch = nil
     end
 
     if isBacktracked then
@@ -2251,6 +1919,8 @@ local lastTypeVisible = false
 local cachedDetected = ""
 local cachedCensored = false
 local lastWordCheck = 0
+local runConn = nil
+local inputConn = nil
 
 runConn = RunService.Heartbeat:Connect(function()
     local success, err = pcall(function()
@@ -2323,20 +1993,10 @@ runConn = RunService.Heartbeat:Connect(function()
                 for _, btn in ipairs(ButtonCache) do btn.Visible = false end
                 StatsData.Count.Text = "Words: 0"
             end
-            listUpdatePending = false
             forceUpdateList = false
-            currentBestMatch = nil
             lastDetected = detected
             lastRequiredLetter = requiredLetter
             return
-        end
-
-        if listUpdatePending and (now - lastInputTime > LIST_DEBOUNCE) then
-            listUpdatePending = false
-            UpdateList(lastDetected, lastRequiredLetter)
-            local visCount = 0
-            for _, b in ipairs(ButtonCache) do if b.Visible then visCount = visCount + 1 end end
-            StatsData.Count.Text = "Words: " .. visCount .. "+"
         end
 
         if not isVisible then
@@ -2349,7 +2009,6 @@ runConn = RunService.Heartbeat:Connect(function()
             end
             lastDetected = "---"
         elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList then
-            currentBestMatch = nil
             lastDetected = detected
             lastRequiredLetter = requiredLetter
 
@@ -2358,7 +2017,6 @@ runConn = RunService.Heartbeat:Connect(function()
                 StatusText.TextColor3 = THEME.SubText
                 Tween(StatusDot, {BackgroundColor3 = THEME.SubText})
                 UpdateList("", requiredLetter)
-                listUpdatePending = false
                 local visCount = 0
                 for _, b in ipairs(ButtonCache) do if b.Visible then visCount = visCount + 1 end end
                 StatsData.Count.Text = "Words: " .. visCount .. "+"
@@ -2384,15 +2042,11 @@ runConn = RunService.Heartbeat:Connect(function()
                         Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
                     end
                 end
-
-                if forceUpdateList then
-                    listUpdatePending = true
-                    lastInputTime = 0
-                    forceUpdateList = false
-                else
-                    listUpdatePending = true
-                    lastInputTime = now
-                end
+                UpdateList(detected, requiredLetter)
+                local visCount = 0
+                for _, b in ipairs(ButtonCache) do if b.Visible then visCount = visCount + 1 end end
+                StatsData.Count.Text = "Words: " .. visCount .. "+"
+                forceUpdateList = false
             end
         end
     end)
@@ -2403,4 +2057,4 @@ inputConn = UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == TOGGLE_KEY then ScreenGui.Enabled = not ScreenGui.Enabled end
 end)
 
-ShowToast("Yoshi loaded! Strategic mode shows best moves first (Green=Best)", "success")
+ShowToast("Yoshi loaded! Blacklist persists across injections. Use 🚫 in Used Words to blacklist permanently.", "success")
