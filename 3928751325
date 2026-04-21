@@ -259,7 +259,7 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     local SHORT_THRESHOLD = 5
     local MAX_WORDS = 40
     
-    local priorityWords = {}
+    local giveWords = {}
     local shortWords = {}
     local otherWords = {}
     
@@ -275,10 +275,11 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
         }
     end
     
+    -- SEPARATE: Give words first!
     for i = 1, #wordData do
         local data = wordData[i]
         if data.isGive then
-            priorityWords[#priorityWords + 1] = data
+            giveWords[#giveWords + 1] = data
         elseif data.len <= SHORT_THRESHOLD then
             shortWords[#shortWords + 1] = data
         else
@@ -311,35 +312,35 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
         return arr
     end
     
-    table.sort(priorityWords, sortByLength)
+    -- Sort each group by length
+    table.sort(giveWords, sortByLength)
     table.sort(shortWords, sortByLength)
     table.sort(otherWords, sortByLength)
     
-    priorityWords = shuffle(limitTo40(priorityWords))
+    -- Shuffle within each group for variety
+    giveWords = shuffle(limitTo40(giveWords))
     shortWords = shuffle(limitTo40(shortWords))
     otherWords = shuffle(limitTo40(otherWords))
     
-    local totalCount = #priorityWords + #shortWords + #otherWords
-    local finalCount = totalCount > MAX_WORDS and MAX_WORDS or totalCount
+    -- Build result: give words FIRST, then short words, then others
     local result = {}
-    local idx = 1
     
-    for i = 1, #priorityWords do
-        result[idx] = priorityWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+    -- Give words have highest priority
+    for i = 1, #giveWords do
+        result[#result + 1] = giveWords[i].word
+        if #result >= MAX_WORDS then break end
     end
     
+    -- Then short words (5 letters or less)
     for i = 1, #shortWords do
-        result[idx] = shortWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+        result[#result + 1] = shortWords[i].word
+        if #result >= MAX_WORDS then break end
     end
     
+    -- Finally other words
     for i = 1, #otherWords do
-        result[idx] = otherWords[i].word
-        idx = idx + 1
-        if idx > finalCount then break end
+        result[#result + 1] = otherWords[i].word
+        if #result >= MAX_WORDS then break end
     end
     
     return result
@@ -1841,41 +1842,40 @@ UpdateList = function(detectedText, requiredLetter)
         if sortMode == "Strategic" then
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
+            -- Split words into give words and regular words
+            local giveWords = {}
+            local regularWords = {}
+            
+            for _, word in ipairs(filtered) do
+                if GiveWordsLookup[word:lower()] then
+                    table.insert(giveWords, word)
+                else
+                    table.insert(regularWords, word)
                 end
-            else
-                customFiltered = filtered
             end
             
-            local lengthGroups = {}
-            local orderTracker = {}
+            -- Sort give words by length (shortest first)
+            table.sort(giveWords, function(a, b)
+                if #a ~= #b then return #a < #b end
+                return a < b
+            end)
             
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
+            -- Sort regular words by length (shortest first)
+            table.sort(regularWords, function(a, b)
+                if #a ~= #b then return #a < #b end
+                return a < b
+            end)
             
-            table.sort(orderTracker)
-            
+            -- Combine: give words first, then regular words
             local sorted = {}
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sorted, word)
-                end
+            for _, word in ipairs(giveWords) do
+                table.insert(sorted, word)
+            end
+            for _, word in ipairs(regularWords) do
+                table.insert(sorted, word)
             end
             
+            -- Limit to 40 results
             local limited = {}
             for i = 1, math.min(40, #sorted) do
                 table.insert(limited, sorted[i])
@@ -2065,8 +2065,34 @@ UpdateList = function(detectedText, requiredLetter)
                 lbl.TextXAlignment = Enum.TextXAlignment.Left
                 lbl.RichText = true
 
-                btn.MouseEnter:Connect(function() Tween(btn, {BackgroundColor3 = Color3.fromRGB(45,45,55)}) end)
-                btn.MouseLeave:Connect(function() Tween(btn, {BackgroundColor3 = THEME.ItemBG}) end)
+                -- ========== ADD GIVE WORD BADGE HERE ==========
+                -- Check if this word is a "give word" (from gives.txt)
+                if GiveWordsLookup[w:lower()] then
+                    -- Give word - highlight with green accent
+                    local giveBadge = Instance.new("TextLabel", btn)
+                    giveBadge.Size = UDim2.new(0, 30, 1, -4)
+                    giveBadge.Position = UDim2.new(1, -35, 0, 2)
+                    giveBadge.BackgroundColor3 = THEME.Success
+                    giveBadge.BackgroundTransparency = 0.3
+                    giveBadge.Text = "GIVE"
+                    giveBadge.TextColor3 = Color3.fromRGB(0, 0, 0)
+                    giveBadge.Font = Enum.Font.GothamBold
+                    giveBadge.TextSize = 8
+                    giveBadge.TextXAlignment = Enum.TextXAlignment.Center
+                    giveBadge.TextYAlignment = Enum.TextYAlignment.Center
+                    Instance.new("UICorner", giveBadge).CornerRadius = UDim.new(0, 3)
+                    
+                    -- Make the text brighter
+                    lbl.TextColor3 = THEME.Success
+                end
+                -- =============================================
+
+                btn.MouseEnter:Connect(function() 
+                    Tween(btn, {BackgroundColor3 = Color3.fromRGB(45,45,55)}) 
+                end)
+                btn.MouseLeave:Connect(function() 
+                    Tween(btn, {BackgroundColor3 = THEME.ItemBG}) 
+                end)
 
                 btn.MouseButton1Click:Connect(function()
                     local d = ButtonData[btn]
