@@ -419,21 +419,53 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
         end
     end
     
-    -- Sort each group by length (shortest first)
-    local function sortByLength(a, b)
-        return a.len < b.len
+    -- Function to shuffle a table
+    local function shuffle(t)
+        for i = #t, 2, -1 do
+            local j = math.random(i)
+            t[i], t[j] = t[j], t[i]
+        end
+        return t
     end
     
-    -- Build result in priority order
-    local result = {}
-    
-    -- 1. Give words (highest priority)
-    table.sort(giveWords, sortByLength)
-    for i = 1, math.min(MAX_WORDS, #giveWords) do
-        result[#result + 1] = giveWords[i].word
+    -- Function to group words by length and shuffle within each group
+    local function groupByLengthAndShuffle(words)
+        local lengthGroups = {}
+        local orderTracker = {}
+        
+        for _, item in ipairs(words) do
+            local len = item.len
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+                table.insert(orderTracker, len)
+            end
+            table.insert(lengthGroups[len], item)
+        end
+        
+        -- Sort lengths ascending
+        table.sort(orderTracker)
+        
+        -- Shuffle each length group
+        for len, group in pairs(lengthGroups) do
+            lengthGroups[len] = shuffle(group)
+        end
+        
+        -- Flatten back in length order
+        local result = {}
+        for _, len in ipairs(orderTracker) do
+            for _, item in ipairs(lengthGroups[len]) do
+                table.insert(result, item)
+            end
+        end
+        return result
     end
     
-    -- 2. Suffix groups in priority order
+    -- Group and shuffle each category
+    local shuffledGiveWords = groupByLengthAndShuffle(giveWords)
+    local shuffledNoSuffixWords = groupByLengthAndShuffle(noSuffixWords)
+    
+    -- Handle suffix groups (preserve priority order, but shuffle within same priority/length)
+    local suffixGroupsProcessed = {}
     local sortedPriorities = {}
     for priority, _ in pairs(suffixGroups) do
         table.insert(sortedPriorities, priority)
@@ -442,20 +474,32 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     
     for _, priority in ipairs(sortedPriorities) do
         local group = suffixGroups[priority]
-        table.sort(group, sortByLength)
-        for i = 1, #group do
+        suffixGroupsProcessed[priority] = groupByLengthAndShuffle(group)
+    end
+    
+    -- Build result in priority order
+    local result = {}
+    
+    -- 1. Give words (highest priority) - shuffled within length groups
+    for _, item in ipairs(shuffledGiveWords) do
+        if #result >= MAX_WORDS then break end
+        result[#result + 1] = item.word
+    end
+    
+    -- 2. Suffix groups in priority order - shuffled within length groups
+    for _, priority in ipairs(sortedPriorities) do
+        local group = suffixGroupsProcessed[priority]
+        for _, item in ipairs(group) do
             if #result >= MAX_WORDS then break end
-            result[#result + 1] = group[i].word
+            result[#result + 1] = item.word
         end
         if #result >= MAX_WORDS then break end
     end
     
-    -- 3. No-suffix words (lowest priority, still sorted by length)
-    if #result < MAX_WORDS then
-        table.sort(noSuffixWords, sortByLength)
-        for i = 1, math.min(MAX_WORDS - #result, #noSuffixWords) do
-            result[#result + 1] = noSuffixWords[i].word
-        end
+    -- 3. No-suffix words (lowest priority) - shuffled within length groups
+    for _, item in ipairs(shuffledNoSuffixWords) do
+        if #result >= MAX_WORDS then break end
+        result[#result + 1] = item.word
     end
     
     return result
