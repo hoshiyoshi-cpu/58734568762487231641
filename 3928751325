@@ -1811,7 +1811,7 @@ UpdateList = function(detectedText, requiredLetter)
         local exacts = {}
         local partials = {}
         local maxPartialLen = 0
-        local MAX_RESULTS = 40
+        local MAX_RESULTS = 200  -- Increased to get more matches for suffix filtering
         
         if #prefix > 15 then return exacts, partials, maxPartialLen end
         
@@ -1855,13 +1855,6 @@ UpdateList = function(detectedText, requiredLetter)
 
     if #exacts > 0 then
         matches = exacts
-        if #matches > 40 then
-            local trimmed = {}
-            for i = 1, 40 do
-                table.insert(trimmed, matches[i])
-            end
-            matches = trimmed
-        end
     elseif pLen > 0 then
         matches = partials
         searchPrefix = searchPrefix:sub(1, pLen)
@@ -1896,9 +1889,6 @@ UpdateList = function(detectedText, requiredLetter)
             suffixPriority[s] = idx
         end
         
-        -- Track used words per suffix to replace them when used
-        if not PerSuffixUsed then PerSuffixUsed = {} end
-        
         -- Calculate suffix priority for each word
         local function getWordPriority(w)
             local wl = w:lower()
@@ -1916,49 +1906,48 @@ UpdateList = function(detectedText, requiredLetter)
             return bestPriority, bestSuffix
         end
         
-        -- Apply sort mode with suffix priority (max 3 per suffix)
+        -- FIRST: Separate suffix matches (ALL of them, we'll limit later)
+        local allSuffixMatches = {}  -- {priority, word}
+        local nonSuffixMatches = {}
+        
+        for _, word in ipairs(matches) do
+            local priority, suffix = getWordPriority(word)
+            if priority < 999 then
+                table.insert(allSuffixMatches, {priority = priority, suffix = suffix, word = word})
+            else
+                table.insert(nonSuffixMatches, word)
+            end
+        end
+        
+        -- Sort suffix matches by priority (lower number = higher priority)
+        table.sort(allSuffixMatches, function(a, b)
+            if a.priority ~= b.priority then
+                return a.priority < b.priority
+            end
+            return #a.word < #b.word  -- Within same priority, sort by length
+        end)
+        
+        -- Take top 3 suffix matches TOTAL (not per suffix)
+        local MAX_SUFFIX_RESULTS = 3
+        local topSuffixWords = {}
+        for i = 1, math.min(MAX_SUFFIX_RESULTS, #allSuffixMatches) do
+            table.insert(topSuffixWords, allSuffixMatches[i].word)
+        end
+        
+        -- Now apply sort mode to non-suffix matches
         if sortMode == "Strategic" then
             local giveWordsLookup = GiveWordsLookup
             local SHORT_THRESHOLD = 5
             local MAX_WORDS = 40
-            local MAX_PER_SUFFIX = 3  -- Max 3 results per suffix priority
             
             local giveWords = {}
-            local suffixGrouped = {}  -- priority -> {words}
             local shortWords = {}
             local otherWords = {}
             
-            for _, word in ipairs(matches) do
+            for _, word in ipairs(nonSuffixMatches) do
                 local wl = word:lower()
-                local priority, suffix = getWordPriority(word)
-                
                 if giveWordsLookup[wl] then
                     table.insert(giveWords, word)
-                elseif priority < 999 then
-                    -- Check if we already have MAX_PER_SUFFIX for this suffix
-                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
-                    local currentCount = 0
-                    if suffixGrouped[priority] then
-                        for _, existingWord in ipairs(suffixGrouped[priority]) do
-                            local _, existingSuffix = getWordPriority(existingWord)
-                            if existingSuffix == suffix then
-                                currentCount = currentCount + 1
-                            end
-                        end
-                    end
-                    if currentCount < MAX_PER_SUFFIX then
-                        if not suffixGrouped[priority] then
-                            suffixGrouped[priority] = {}
-                        end
-                        table.insert(suffixGrouped[priority], word)
-                    else
-                        -- Too many for this suffix, treat as regular word
-                        if #wl <= SHORT_THRESHOLD then
-                            table.insert(shortWords, word)
-                        else
-                            table.insert(otherWords, word)
-                        end
-                    end
                 elseif #wl <= SHORT_THRESHOLD then
                     table.insert(shortWords, word)
                 else
@@ -1971,7 +1960,6 @@ UpdateList = function(detectedText, requiredLetter)
             table.sort(shortWords, sortByLength)
             table.sort(otherWords, sortByLength)
             
-            -- Shuffle within groups for variety
             local function shuffle(t)
                 for i = #t, 2, -1 do
                     local j = math.random(i)
@@ -1982,27 +1970,16 @@ UpdateList = function(detectedText, requiredLetter)
             
             local result = {}
             
-            -- Give words first
-            for _, word in ipairs(shuffle(giveWords)) do
+            -- Suffix matches FIRST (top 3)
+            for _, word in ipairs(topSuffixWords) do
                 if #result >= MAX_WORDS then break end
                 table.insert(result, word)
             end
             
-            -- Suffix groups in priority order (max 3 per suffix already enforced)
-            local sortedPriorities = {}
-            for p, _ in pairs(suffixGrouped) do
-                table.insert(sortedPriorities, p)
-            end
-            table.sort(sortedPriorities)
-            
-            for _, p in ipairs(sortedPriorities) do
-                local group = suffixGrouped[p]
-                table.sort(group, sortByLength)
-                for _, word in ipairs(shuffle(group)) do
-                    if #result >= MAX_WORDS then break end
-                    table.insert(result, word)
-                end
+            -- Give words
+            for _, word in ipairs(shuffle(giveWords)) do
                 if #result >= MAX_WORDS then break end
+                table.insert(result, word)
             end
             
             -- Short words
@@ -2020,73 +1997,40 @@ UpdateList = function(detectedText, requiredLetter)
             matches = result
             
         elseif sortMode == "Shortest" then
-            -- Shortest mode with suffix priority (max 3 per suffix)
-            local MAX_PER_SUFFIX = 3
             local giveWords = {}
-            local suffixGrouped = {}
-            local otherWords = {}
+            local regularWords = {}
             
-            for _, word in ipairs(matches) do
-                local wl = word:lower()
-                local priority, suffix = getWordPriority(word)
-                
-                if GiveWordsLookup[wl] then
+            for _, word in ipairs(nonSuffixMatches) do
+                if GiveWordsLookup[word:lower()] then
                     table.insert(giveWords, word)
-                elseif priority < 999 then
-                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
-                    local currentCount = 0
-                    if suffixGrouped[priority] then
-                        for _, existingWord in ipairs(suffixGrouped[priority]) do
-                            local _, existingSuffix = getWordPriority(existingWord)
-                            if existingSuffix == suffix then
-                                currentCount = currentCount + 1
-                            end
-                        end
-                    end
-                    if currentCount < MAX_PER_SUFFIX then
-                        if not suffixGrouped[priority] then
-                            suffixGrouped[priority] = {}
-                        end
-                        table.insert(suffixGrouped[priority], word)
-                    else
-                        table.insert(otherWords, word)
-                    end
                 else
-                    table.insert(otherWords, word)
+                    table.insert(regularWords, word)
                 end
             end
             
-            local function sortByLength(a, b) return #a < #b end
+            local function sortByLength(a, b) 
+                if #a ~= #b then return #a < #b end
+                return a < b
+            end
             table.sort(giveWords, sortByLength)
-            table.sort(otherWords, sortByLength)
+            table.sort(regularWords, sortByLength)
             
             local result = {}
             
-            -- Give words first
+            -- Suffix matches FIRST (top 3)
+            for _, word in ipairs(topSuffixWords) do
+                if #result >= 40 then break end
+                table.insert(result, word)
+            end
+            
+            -- Give words
             for _, word in ipairs(giveWords) do
                 if #result >= 40 then break end
                 table.insert(result, word)
             end
             
-            -- Suffix groups in priority order, each sorted by length
-            local sortedPriorities = {}
-            for p, _ in pairs(suffixGrouped) do
-                table.insert(sortedPriorities, p)
-            end
-            table.sort(sortedPriorities)
-            
-            for _, p in ipairs(sortedPriorities) do
-                local group = suffixGrouped[p]
-                table.sort(group, sortByLength)
-                for _, word in ipairs(group) do
-                    if #result >= 40 then break end
-                    table.insert(result, word)
-                end
-                if #result >= 40 then break end
-            end
-            
-            -- Other words
-            for _, word in ipairs(otherWords) do
+            -- Regular words
+            for _, word in ipairs(regularWords) do
                 if #result >= 40 then break end
                 table.insert(result, word)
             end
@@ -2094,134 +2038,78 @@ UpdateList = function(detectedText, requiredLetter)
             matches = result
             
         elseif sortMode == "Random" then
-            -- Random mode with suffix priority (max 3 per suffix)
-            local MAX_PER_SUFFIX = 3
-            local suffixGrouped = {}
-            local noSuffix = {}
-            
-            for _, word in ipairs(matches) do
-                local priority, suffix = getWordPriority(word)
-                if priority < 999 then
-                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
-                    local currentCount = 0
-                    if suffixGrouped[priority] then
-                        for _, existingWord in ipairs(suffixGrouped[priority]) do
-                            local _, existingSuffix = getWordPriority(existingWord)
-                            if existingSuffix == suffix then
-                                currentCount = currentCount + 1
-                            end
-                        end
-                    end
-                    if currentCount < MAX_PER_SUFFIX then
-                        if not suffixGrouped[priority] then
-                            suffixGrouped[priority] = {}
-                        end
-                        table.insert(suffixGrouped[priority], word)
-                    else
-                        table.insert(noSuffix, word)
-                    end
-                else
-                    table.insert(noSuffix, word)
+            -- Filter by length mode FIRST
+            local lengthFiltered = {}
+            for _, word in ipairs(nonSuffixMatches) do
+                if lengthMode == 0 or #word == lengthMode then
+                    table.insert(lengthFiltered, word)
                 end
             end
+            
+            -- Shuffle remaining words
+            for i = #lengthFiltered, 2, -1 do
+                local j = math.random(i)
+                lengthFiltered[i], lengthFiltered[j] = lengthFiltered[j], lengthFiltered[i]
+            end
+            
+            -- Group by length for ordered display
+            local lengthGroups = {}
+            local orderTracker = {}
+            
+            for _, word in ipairs(lengthFiltered) do
+                local len = #word
+                if not lengthGroups[len] then
+                    lengthGroups[len] = {}
+                    table.insert(orderTracker, len)
+                end
+                table.insert(lengthGroups[len], word)
+            end
+            
+            table.sort(orderTracker)
             
             local result = {}
             
-            -- Suffix groups in priority order
-            local sortedPriorities = {}
-            for p, _ in pairs(suffixGrouped) do
-                table.insert(sortedPriorities, p)
+            -- Suffix matches FIRST (top 3)
+            for _, word in ipairs(topSuffixWords) do
+                if #result >= 40 then break end
+                table.insert(result, word)
             end
-            table.sort(sortedPriorities)
             
-            for _, p in ipairs(sortedPriorities) do
-                local group = suffixGrouped[p]
-                -- Shuffle within group
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-                for _, word in ipairs(group) do
+            -- Then other words grouped by length
+            for _, len in ipairs(orderTracker) do
+                for _, word in ipairs(lengthGroups[len]) do
                     if #result >= 40 then break end
                     table.insert(result, word)
                 end
                 if #result >= 40 then break end
             end
             
-            -- No suffix words shuffled
-            for i = #noSuffix, 2, -1 do
-                local j = math.random(i)
-                noSuffix[i], noSuffix[j] = noSuffix[j], noSuffix[i]
-            end
-            for _, word in ipairs(noSuffix) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
             matches = result
             
         elseif sortMode == "Smart" then
-            -- Smart mode with suffix priority (max 3 per suffix)
-            local MAX_PER_SUFFIX = 3
-            local suffixGrouped = {}
+            local SHORT_THRESHOLD = 6
             local shortWords = {}
             local longWords = {}
-            local SHORT_THRESHOLD = 6
             
-            for _, word in ipairs(matches) do
-                local priority, suffix = getWordPriority(word)
-                if priority < 999 then
-                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
-                    local currentCount = 0
-                    if suffixGrouped[priority] then
-                        for _, existingWord in ipairs(suffixGrouped[priority]) do
-                            local _, existingSuffix = getWordPriority(existingWord)
-                            if existingSuffix == suffix then
-                                currentCount = currentCount + 1
-                            end
-                        end
-                    end
-                    if currentCount < MAX_PER_SUFFIX then
-                        if not suffixGrouped[priority] then
-                            suffixGrouped[priority] = {}
-                        end
-                        table.insert(suffixGrouped[priority], word)
-                    elseif #word <= SHORT_THRESHOLD then
-                        table.insert(shortWords, word)
-                    else
-                        table.insert(longWords, word)
-                    end
-                elseif #word <= SHORT_THRESHOLD then
+            for _, word in ipairs(nonSuffixMatches) do
+                if #word <= SHORT_THRESHOLD then
                     table.insert(shortWords, word)
                 else
                     table.insert(longWords, word)
                 end
             end
             
-            local result = {}
-            
-            -- Suffix groups in priority order
-            local sortedPriorities = {}
-            for p, _ in pairs(suffixGrouped) do
-                table.insert(sortedPriorities, p)
+            -- Shuffle within groups
+            for i = #shortWords, 2, -1 do
+                local j = math.random(i)
+                shortWords[i], shortWords[j] = shortWords[j], shortWords[i]
             end
-            table.sort(sortedPriorities)
-            
-            for _, p in ipairs(sortedPriorities) do
-                local group = suffixGrouped[p]
-                -- Shuffle within group
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-                for _, word in ipairs(group) do
-                    if #result >= 40 then break end
-                    table.insert(result, word)
-                end
-                if #result >= 40 then break end
+            for i = #longWords, 2, -1 do
+                local j = math.random(i)
+                longWords[i], longWords[j] = longWords[j], longWords[i]
             end
             
-            -- Short words (shuffled by length groups)
+            -- Group short words by length
             local lengthGroups = {}
             local orderTracker = {}
             for _, word in ipairs(shortWords) do
@@ -2233,24 +2121,25 @@ UpdateList = function(detectedText, requiredLetter)
                 table.insert(lengthGroups[len], word)
             end
             table.sort(orderTracker)
+            
+            local result = {}
+            
+            -- Suffix matches FIRST (top 3)
+            for _, word in ipairs(topSuffixWords) do
+                if #result >= 40 then break end
+                table.insert(result, word)
+            end
+            
+            -- Short words by length
             for _, len in ipairs(orderTracker) do
-                local group = lengthGroups[len]
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-                for _, word in ipairs(group) do
+                for _, word in ipairs(lengthGroups[len]) do
                     if #result >= 40 then break end
                     table.insert(result, word)
                 end
                 if #result >= 40 then break end
             end
             
-            -- Long words shuffled
-            for i = #longWords, 2, -1 do
-                local j = math.random(i)
-                longWords[i], longWords[j] = longWords[j], longWords[i]
-            end
+            -- Long words
             for _, word in ipairs(longWords) do
                 if #result >= 40 then break end
                 table.insert(result, word)
