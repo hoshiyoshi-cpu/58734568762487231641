@@ -1960,11 +1960,7 @@ UpdateList = function(detectedText, requiredLetter)
     local primarySet = {}
     for _, w in ipairs(PrimaryWords) do primarySet[w] = true end
     
-    -- Track used suffix words (but we'll find the shortest each time)
-    if not UsedSuffixWords then UsedSuffixWords = {} end
-    
-    -- OPTIMIZED: Single pass through the bucket, but we ALWAYS look for the SHORTEST
-    -- We'll track the shortest word found for each suffix
+    -- SINGLE PASS - Track the shortest word for each suffix as we go
     local bestSuffixWords = {}  -- suffix -> best word found
     local bestSuffixLength = {} -- suffix -> length of best word
     
@@ -1972,9 +1968,13 @@ UpdateList = function(detectedText, requiredLetter)
     local fallbackRemaining = {}
     local usedInSuffix = {}
     
-    -- FIRST PASS: Find the SHORTEST word for each suffix
     local prefixLen = #searchPrefix
+    local suffixesNeeded = {}  -- Track which suffixes we still need to find
+    for _, suffix in ipairs(suffixList) do
+        suffixesNeeded[suffix] = true
+    end
     
+    -- SINGLE SCAN - find shortest suffix words AND collect regular words
     for _, w in ipairs(bucket) do
         -- Check prefix match
         if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
@@ -1982,39 +1982,23 @@ UpdateList = function(detectedText, requiredLetter)
             if lengthMode == 0 or #w == lengthMode then
                 -- Check not used/blacklisted
                 if not Blacklist[w] and not UsedWords[w] then
-                    -- Check if this word matches any suffix
+                    -- Check if this word matches any suffix we still need
+                    local matchedSuffix = nil
                     for _, suffix in ipairs(suffixList) do
-                        if #w >= #suffix and w:sub(-#suffix) == suffix then
-                            -- If we haven't found this suffix yet, OR this word is shorter
-                            if not bestSuffixWords[suffix] or #w < bestSuffixLength[suffix] then
-                                bestSuffixWords[suffix] = w
-                                bestSuffixLength[suffix] = #w
+                        if suffixesNeeded[suffix] then
+                            if #w >= #suffix and w:sub(-#suffix) == suffix then
+                                matchedSuffix = suffix
+                                break
                             end
-                            break -- Only match one suffix per word
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    -- SECOND PASS: Collect all words, but mark the best suffix words as used
-    for _, w in ipairs(bucket) do
-        if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
-            if lengthMode == 0 or #w == lengthMode then
-                if not Blacklist[w] and not UsedWords[w] then
-                    -- Check if this is one of our best suffix words
-                    local isBestSuffix = false
-                    for suffix, bestWord in pairs(bestSuffixWords) do
-                        if w == bestWord then
-                            isBestSuffix = true
-                            break
                         end
                     end
                     
-                    if isBestSuffix then
-                        -- It's a suffix word, mark as used
-                        usedInSuffix[w] = true
+                    if matchedSuffix then
+                        -- This is a suffix word we need
+                        if not bestSuffixWords[matchedSuffix] or #w < bestSuffixLength[matchedSuffix] then
+                            bestSuffixWords[matchedSuffix] = w
+                            bestSuffixLength[matchedSuffix] = #w
+                        end
                     else
                         -- Regular word, add to appropriate list
                         if primarySet[w] then
@@ -2027,24 +2011,22 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        -- Early exit if we have enough words (40)
-        if #primaryRemaining + #fallbackRemaining >= 40 and #bestSuffixWords == #suffixList then
+        -- Early exit: if we have all suffixes and enough regular words (40), stop
+        local allSuffixesFound = true
+        for _, suffix in ipairs(suffixList) do
+            if not bestSuffixWords[suffix] then
+                allSuffixesFound = false
+                break
+            end
+        end
+        
+        if allSuffixesFound and #primaryRemaining + #fallbackRemaining >= 40 then
             break
         end
     end
     
-    -- Build suffix words list in priority order (preserving suffix order)
-    local orderedSuffixWords = {}
-    for _, suffix in ipairs(suffixList) do
-        if bestSuffixWords[suffix] then
-            table.insert(orderedSuffixWords, bestSuffixWords[suffix])
-            -- Update the stored word for this suffix
-            UsedSuffixWords[suffix] = bestSuffixWords[suffix]
-        end
-    end
-    
     -- Handle partial matches if no words found at all
-    if #orderedSuffixWords == 0 and #primaryRemaining == 0 and #fallbackRemaining == 0 then
+    if #primaryRemaining == 0 and #fallbackRemaining == 0 and next(bestSuffixWords) == nil then
         -- Try partial matching (backtracking)
         local maxPartialLen = 0
         local partialMatches = {}
@@ -2073,6 +2055,30 @@ UpdateList = function(detectedText, requiredLetter)
             isBacktracked = true
         end
     end
+    
+    -- Build suffix words list in priority order
+    local orderedSuffixWords = {}
+    for _, suffix in ipairs(suffixList) do
+        if bestSuffixWords[suffix] then
+            table.insert(orderedSuffixWords, bestSuffixWords[suffix])
+            -- Mark as used so they don't appear in regular lists
+            usedInSuffix[bestSuffixWords[suffix]] = true
+        end
+    end
+    
+    -- Remove suffix words from remaining lists (in case they were added)
+    local function filterList(list, toRemove)
+        local newList = {}
+        for _, w in ipairs(list) do
+            if not toRemove[w] then
+                table.insert(newList, w)
+            end
+        end
+        return newList
+    end
+    
+    primaryRemaining = filterList(primaryRemaining, usedInSuffix)
+    fallbackRemaining = filterList(fallbackRemaining, usedInSuffix)
     
     -- Sort PRIMARY remaining by mode
     local sortedPrimary = {}
@@ -2134,7 +2140,7 @@ UpdateList = function(detectedText, requiredLetter)
         StatusText.TextColor3 = THEME.SubText
     end
 
-    -- Update buttons (same as before)
+    -- Update buttons
     for i = 1, math.max(#displayList, #ButtonCache) do
         local w = displayList[i]
         local btn = ButtonCache[i]
