@@ -1905,32 +1905,13 @@ UpdateList = function(detectedText, requiredLetter)
         firstChar = requiredLetter:sub(1,1):lower()
     end
 
-    -- Determine which bucket to use based on whether we're searching manually or not
-    local searchWords = AllWords
-    if not manualSearch and firstChar and firstChar ~= "" then
-        -- For automatic detection, prioritize PRIMARY words
-        searchWords = PrimaryWords
-    end
-    
-    local bucket
-    if firstChar and firstChar ~= "" and Buckets then
-        bucket = Buckets[firstChar] or {}
-    else
-        bucket = searchWords
-    end
-
-    local function CollectMatches(prefix, ignoreLengthFilter)
+    -- Function to collect matches from a specific word list
+    local function CollectMatchesFromList(wordList, prefix, ignoreLengthFilter, maxResults)
         local exacts = {}
-        local partials = {}
-        local maxPartialLen = 0
-        local MAX_RESULTS = 200
-        
-        if #prefix > 15 then return exacts, partials, maxPartialLen end
-        
         local prefixLen = #prefix
         local prefixFirstChar = prefixLen > 0 and prefix:sub(1,1) or ""
         
-        for _, w in ipairs(bucket) do
+        for _, w in ipairs(wordList) do
             if prefixFirstChar ~= "" and w:sub(1,1) ~= prefixFirstChar then
                 -- skip
             elseif lengthMode > 0 and not ignoreLengthFilter and #w ~= lengthMode then
@@ -1940,70 +1921,104 @@ UpdateList = function(detectedText, requiredLetter)
             else
                 if w:sub(1, prefixLen) == prefix then
                     table.insert(exacts, w)
-                    if #exacts >= MAX_RESULTS then break end
-                elseif #exacts == 0 then
-                    local mLen = GetMatchLength(w, prefix)
-                    if mLen > maxPartialLen then
-                        maxPartialLen = mLen
-                        partials = {w}
-                    elseif mLen == maxPartialLen and mLen > 0 then
-                        if #partials < MAX_RESULTS then 
-                            table.insert(partials, w)
-                        end
-                    end
+                    if #exacts >= maxResults then break end
                 end
             end
         end
-        
-        -- If no exact matches found in primary bucket, try fallback
-        if #exacts == 0 and #partials == 0 and bucket ~= FallbackWords and not manualSearch then
-            for _, w in ipairs(FallbackWords) do
-                if prefixFirstChar ~= "" and w:sub(1,1) ~= prefixFirstChar then
-                    -- skip
-                elseif lengthMode > 0 and not ignoreLengthFilter and #w ~= lengthMode then
-                    -- skip
-                elseif Blacklist[w] or UsedWords[w] then
-                    -- skip
-                else
-                    if w:sub(1, prefixLen) == prefix then
-                        table.insert(exacts, w)
-                        if #exacts >= MAX_RESULTS then break end
-                    elseif #exacts == 0 then
-                        local mLen = GetMatchLength(w, prefix)
-                        if mLen > maxPartialLen then
-                            maxPartialLen = mLen
-                            partials = {w}
-                        elseif mLen == maxPartialLen and mLen > 0 then
-                            if #partials < MAX_RESULTS then 
-                                table.insert(partials, w)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        
-        return exacts, partials, maxPartialLen
+        return exacts
     end
-
-    local exacts, partials, pLen = CollectMatches(searchPrefix, false)
-
+    
+    -- Function to collect partial matches
+    local function CollectPartialMatchesFromList(wordList, prefix, ignoreLengthFilter, maxResults)
+        local partials = {}
+        local maxPartialLen = 0
+        local prefixLen = #prefix
+        local prefixFirstChar = prefixLen > 0 and prefix:sub(1,1) or ""
+        
+        for _, w in ipairs(wordList) do
+            if prefixFirstChar ~= "" and w:sub(1,1) ~= prefixFirstChar then
+                -- skip
+            elseif lengthMode > 0 and not ignoreLengthFilter and #w ~= lengthMode then
+                -- skip
+            elseif Blacklist[w] or UsedWords[w] then
+                -- skip
+            else
+                local mLen = GetMatchLength(w, prefix)
+                if mLen > maxPartialLen then
+                    maxPartialLen = mLen
+                    partials = {w}
+                elseif mLen == maxPartialLen and mLen > 0 then
+                    if #partials < maxResults then 
+                        table.insert(partials, w)
+                    end
+                end
+            end
+        end
+        
+        return partials, maxPartialLen
+    end
+    
+    -- Collect matches: PRIMARY first, then FALLBACK if needed
+    local exacts = {}
+    local primaryExacts = CollectMatchesFromList(PrimaryWords, searchPrefix, false, 200)
+    for _, w in ipairs(primaryExacts) do
+        table.insert(exacts, w)
+    end
+    
+    -- Only search fallback if we don't have enough primary matches
+    if #exacts < 200 then
+        local fallbackExacts = CollectMatchesFromList(FallbackWords, searchPrefix, false, 200 - #exacts)
+        for _, w in ipairs(fallbackExacts) do
+            local duplicate = false
+            for _, existing in ipairs(exacts) do
+                if existing == w then duplicate = true break end
+            end
+            if not duplicate then
+                table.insert(exacts, w)
+            end
+        end
+    end
+    
+    local partials = {}
+    local pLen = 0
+    
+    if #exacts == 0 then
+        -- Try partial matches from PRIMARY first
+        local primaryPartials, primaryPLen = CollectPartialMatchesFromList(PrimaryWords, searchPrefix, false, 200)
+        if #primaryPartials > 0 then
+            partials = primaryPartials
+            pLen = primaryPLen
+        else
+            -- Then try FALLBACK
+            local fallbackPartials, fallbackPLen = CollectPartialMatchesFromList(FallbackWords, searchPrefix, false, 200)
+            partials = fallbackPartials
+            pLen = fallbackPLen
+        end
+    end
+    
+    -- If length mode is on and no exacts, try ignoring length filter
     if #exacts == 0 and lengthMode > 0 then
-        local fe, _, _ = CollectMatches(searchPrefix, true)
-        if #fe > 0 then exacts = fe end
+        local primaryExactsLen = CollectMatchesFromList(PrimaryWords, searchPrefix, true, 200)
+        if #primaryExactsLen > 0 then
+            exacts = primaryExactsLen
+        else
+            local fallbackExactsLen = CollectMatchesFromList(FallbackWords, searchPrefix, true, 200)
+            exacts = fallbackExactsLen
+        end
     end
 
     if #exacts > 0 then
         matches = exacts
-    elseif pLen > 0 then
+    elseif #partials > 0 then
         matches = partials
         searchPrefix = searchPrefix:sub(1, pLen)
         isBacktracked = true
     elseif requiredLetter and #requiredLetter > 0 then
         local reqChar = requiredLetter:sub(1,1):lower()
         if searchPrefix:sub(1,1):lower() ~= reqChar then
-            local fallbackBucket = PrimaryBuckets[reqChar] or {}
-            for _, w in ipairs(fallbackBucket) do
+            -- Search PRIMARY first
+            local primaryBucket = PrimaryBuckets[reqChar] or {}
+            for _, w in ipairs(primaryBucket) do
                 if not Blacklist[w] and not UsedWords[w] then
                     local mLen = GetMatchLength(w, requiredLetter)
                     if mLen == #requiredLetter then
@@ -2012,6 +2027,7 @@ UpdateList = function(detectedText, requiredLetter)
                     end
                 end
             end
+            -- If not enough, search FALLBACK
             if #matches < 200 then
                 local allBucket = Buckets[reqChar] or {}
                 for _, w in ipairs(allBucket) do
@@ -2038,6 +2054,24 @@ UpdateList = function(detectedText, requiredLetter)
     end
 
     if #matches > 0 then
+        -- Split matches into PRIMARY and FALLBACK groups
+        local primaryMatches = {}
+        local fallbackMatches = {}
+        
+        -- Create a lookup set for primary words for O(1) checking
+        local primarySet = {}
+        for _, w in ipairs(PrimaryWords) do
+            primarySet[w] = true
+        end
+        
+        for _, word in ipairs(matches) do
+            if primarySet[word] then
+                table.insert(primaryMatches, word)
+            else
+                table.insert(fallbackMatches, word)
+            end
+        end
+        
         -- Get suffix priorities
         local suffixList = Config.SuffixModes or {}
         local suffixPriority = {}
@@ -2045,7 +2079,7 @@ UpdateList = function(detectedText, requiredLetter)
             suffixPriority[s] = idx
         end
         
-        -- Calculate suffix priority for each word
+        -- Calculate suffix priority for a word
         local function getWordPriority(w)
             local wl = w:lower()
             local bestPriority = 999
@@ -2060,65 +2094,108 @@ UpdateList = function(detectedText, requiredLetter)
             return bestPriority
         end
         
-        -- Separate suffix matches
-        local allSuffixMatches = {}  -- {priority, word}
-        local nonSuffixMatches = {}
+        -- Extract top suffix matches from a list (max 3 total across both lists)
+        local function getTopSuffixMatches(wordList, maxCount)
+            local suffixMatches = {}
+            for _, word in ipairs(wordList) do
+                local priority = getWordPriority(word)
+                if priority < 999 then
+                    table.insert(suffixMatches, {priority = priority, word = word})
+                end
+            end
+            table.sort(suffixMatches, function(a, b)
+                if a.priority ~= b.priority then return a.priority < b.priority end
+                return #a.word < #b.word
+            end)
+            local result = {}
+            for i = 1, math.min(maxCount, #suffixMatches) do
+                table.insert(result, suffixMatches[i].word)
+            end
+            return result
+        end
         
-        for _, word in ipairs(matches) do
-            local priority = getWordPriority(word)
-            if priority < 999 then
-                table.insert(allSuffixMatches, {priority = priority, word = word})
-            else
-                table.insert(nonSuffixMatches, word)
+        -- Get top 3 suffix matches from PRIMARY first, then FALLBACK if needed
+        local topSuffixWords = getTopSuffixMatches(primaryMatches, 3)
+        if #topSuffixWords < 3 then
+            local remaining = 3 - #topSuffixWords
+            local fallbackSuffix = getTopSuffixMatches(fallbackMatches, remaining)
+            for _, word in ipairs(fallbackSuffix) do
+                table.insert(topSuffixWords, word)
             end
         end
         
-        -- Sort suffix matches by priority and length
-        table.sort(allSuffixMatches, function(a, b)
-            if a.priority ~= b.priority then
-                return a.priority < b.priority
-            end
-            return #a.word < #b.word
-        end)
-        
-        -- Take top 3 suffix matches
-        local MAX_SUFFIX_RESULTS = 3
-        local topSuffixWords = {}
-        for i = 1, math.min(MAX_SUFFIX_RESULTS, #allSuffixMatches) do
-            table.insert(topSuffixWords, allSuffixMatches[i].word)
-        end
-        
-        -- Apply the selected sort mode to non-suffix matches
-        local sortedNonSuffix = {}
+        -- Sort PRIMARY matches according to mode
+        local sortedPrimary = {}
         if sortMode == "Strategic" then
-            sortedNonSuffix = StrategicSort(nonSuffixMatches, searchPrefix, UsedWords)
+            sortedPrimary = StrategicSort(primaryMatches, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            -- Sort by length (shortest first)
-            table.sort(nonSuffixMatches, function(a, b)
+            table.sort(primaryMatches, function(a, b)
                 if #a ~= #b then return #a < #b end
                 return a < b
             end)
-            sortedNonSuffix = nonSuffixMatches
+            sortedPrimary = primaryMatches
         elseif sortMode == "Random" then
-            -- Shuffle randomly
-            for i = #nonSuffixMatches, 2, -1 do
+            for i = #primaryMatches, 2, -1 do
                 local j = math.random(i)
-                nonSuffixMatches[i], nonSuffixMatches[j] = nonSuffixMatches[j], nonSuffixMatches[i]
+                primaryMatches[i], primaryMatches[j] = primaryMatches[j], primaryMatches[i]
             end
-            sortedNonSuffix = nonSuffixMatches
+            sortedPrimary = primaryMatches
         elseif sortMode == "Smart" then
-            sortedNonSuffix = SmartSort(nonSuffixMatches, searchPrefix, UsedWords)
+            sortedPrimary = SmartSort(primaryMatches, searchPrefix, UsedWords)
         end
         
-        -- Combine: top suffix matches first, then sorted non-suffix matches (limit to 40)
+        -- Sort FALLBACK matches according to mode
+        local sortedFallback = {}
+        if sortMode == "Strategic" then
+            sortedFallback = StrategicSort(fallbackMatches, searchPrefix, UsedWords)
+        elseif sortMode == "Shortest" then
+            table.sort(fallbackMatches, function(a, b)
+                if #a ~= #b then return #a < #b end
+                return a < b
+            end)
+            sortedFallback = fallbackMatches
+        elseif sortMode == "Random" then
+            for i = #fallbackMatches, 2, -1 do
+                local j = math.random(i)
+                fallbackMatches[i], fallbackMatches[j] = fallbackMatches[j], fallbackMatches[i]
+            end
+            sortedFallback = fallbackMatches
+        elseif sortMode == "Smart" then
+            sortedFallback = SmartSort(fallbackMatches, searchPrefix, UsedWords)
+        end
+        
+        -- Combine: Top suffix matches (from both) -> PRIMARY sorted -> FALLBACK sorted
         local result = {}
+        
+        -- Add top 3 suffix matches (these could be from PRIMARY or FALLBACK)
         for _, word in ipairs(topSuffixWords) do
             if #result >= 40 then break end
             table.insert(result, word)
         end
-        for _, word in ipairs(sortedNonSuffix) do
+        
+        -- Add PRIMARY words
+        for _, word in ipairs(sortedPrimary) do
             if #result >= 40 then break end
-            table.insert(result, word)
+            -- Don't duplicate suffix matches that are already added
+            local isDuplicate = false
+            for _, existing in ipairs(result) do
+                if existing == word then isDuplicate = true break end
+            end
+            if not isDuplicate then
+                table.insert(result, word)
+            end
+        end
+        
+        -- Add FALLBACK words
+        for _, word in ipairs(sortedFallback) do
+            if #result >= 40 then break end
+            local isDuplicate = false
+            for _, existing in ipairs(result) do
+                if existing == word then isDuplicate = true break end
+            end
+            if not isDuplicate then
+                table.insert(result, word)
+            end
         end
         
         matches = result
