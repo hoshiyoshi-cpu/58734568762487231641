@@ -1485,74 +1485,85 @@ do
             suffixPriority[s] = idx
         end
 
-        -- Group results by suffix priority (search PRIMARY words first, then ALL words)
+        -- Use a set to avoid duplicates
+        local seenWords = {}
         local priorityResults = {}  -- priority -> {words}
+        local MAX_RESULTS = 200
         
-        -- Helper to add words to results
-        local function addWordsToResults(wordList)
-            for _, w in ipairs(wordList) do
-                if not Blacklist[w] and not UsedWords[w] then
-                    local matchLen = (lVal == nil or lVal == 0) or (#w == lVal)
-                    if matchLen then
-                        local matchedSuffix = nil
-                        local matchedPriority = 999
-                        
-                        if #Config.SuffixModes > 0 then
-                            for _, s in ipairs(Config.SuffixModes) do
-                                if #w >= #s and w:sub(-#s) == s then
-                                    local p = suffixPriority[s] or 999
-                                    if p < matchedPriority then
-                                        matchedPriority = p
-                                        matchedSuffix = s
-                                    end
-                                end
-                            end
-                        end
-                        
-                        if matchedSuffix and #Config.SuffixModes > 0 then
-                            if not priorityResults[matchedPriority] then
-                                priorityResults[matchedPriority] = {}
-                            end
-                            -- Avoid duplicates
-                            local exists = false
-                            for _, existing in ipairs(priorityResults[matchedPriority]) do
-                                if existing == w then exists = true break end
-                            end
-                            if not exists then
-                                table.insert(priorityResults[matchedPriority], w)
-                            end
-                        elseif eVal == "" then
-                            if not priorityResults[0] then
-                                priorityResults[0] = {}
-                            end
-                            local exists = false
-                            for _, existing in ipairs(priorityResults[0]) do
-                                if existing == w then exists = true break end
-                            end
-                            if not exists then
-                                table.insert(priorityResults[0], w)
-                            end
-                        else
-                            if not priorityResults[999] then
-                                priorityResults[999] = {}
-                            end
-                            local exists = false
-                            for _, existing in ipairs(priorityResults[999]) do
-                                if existing == w then exists = true break end
-                            end
-                            if not exists then
-                                table.insert(priorityResults[999], w)
-                            end
-                        end
+        -- Helper to add words to results (with duplicate prevention)
+        local function addWordToResults(w, priority)
+            if seenWords[w] then return end
+            seenWords[w] = true
+            
+            if not priorityResults[priority] then
+                priorityResults[priority] = {}
+            end
+            table.insert(priorityResults[priority], w)
+        end
+        
+        -- Helper to check if word matches suffix
+        local function getWordPriority(w)
+            local bestPriority = 999
+            for _, s in ipairs(Config.SuffixModes) do
+                if #w >= #s and w:sub(-#s) == s then
+                    local p = suffixPriority[s] or 999
+                    if p < bestPriority then
+                        bestPriority = p
+                    end
+                end
+            end
+            return bestPriority
+        end
+        
+        -- Helper to check length match
+        local function matchesLength(w)
+            return (lVal == nil or lVal == 0) or (#w == lVal)
+        end
+        
+        -- Search PRIMARY words first (these are the most important)
+        local primaryCount = 0
+        for _, w in ipairs(PrimaryWords) do
+            if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                local priority = 999
+                if #Config.SuffixModes > 0 then
+                    priority = getWordPriority(w)
+                    if priority < 999 then
+                        addWordToResults(w, priority)
+                        primaryCount = primaryCount + 1
+                        if primaryCount >= MAX_RESULTS then break end
+                    end
+                elseif eVal == "" then
+                    addWordToResults(w, 0)
+                    primaryCount = primaryCount + 1
+                    if primaryCount >= MAX_RESULTS then break end
+                end
+            end
+        end
+        
+        -- If we have suffix modes and didn't reach max, also search fallback for suffix matches
+        if #Config.SuffixModes > 0 and primaryCount < MAX_RESULTS then
+            for _, w in ipairs(FallbackWords) do
+                if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                    local priority = getWordPriority(w)
+                    if priority < 999 then
+                        addWordToResults(w, priority)
+                        primaryCount = primaryCount + 1
+                        if primaryCount >= MAX_RESULTS then break end
                     end
                 end
             end
         end
         
-        -- Add PRIMARY words first
-        addWordsToResults(PrimaryWords)
-        -- Then add FALLBACK words (will only add if not already in results)
-        addWordsToResults(FallbackWords)
+        -- If no suffix filter, add remaining fallback words (but limit)
+        if eVal == "" and primaryCount < MAX_RESULTS then
+            for _, w in ipairs(FallbackWords) do
+                if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                    addWordToResults(w, 0)
+                    primaryCount = primaryCount + 1
+                    if primaryCount >= MAX_RESULTS then break end
+                end
+            end
+        end
         
         -- Build sorted results by priority, then by length within each group
         local sortedResults = {}
@@ -1564,6 +1575,7 @@ do
         
         for _, p in ipairs(priorities) do
             local group = priorityResults[p]
+            -- Sort by length (shortest first)
             table.sort(group, function(a, b) 
                 if #a ~= #b then 
                     return #a < #b 
@@ -1572,13 +1584,15 @@ do
             end)
             for _, word in ipairs(group) do
                 table.insert(sortedResults, word)
-                if #sortedResults >= 200 then break end
+                if #sortedResults >= MAX_RESULTS then break end
             end
-            if #sortedResults >= 200 then break end
+            if #sortedResults >= MAX_RESULTS then break end
         end
         
-        -- Display the sorted results
-        for i, w in ipairs(sortedResults) do
+        -- Display the sorted results (limit to 200 for performance)
+        local displayLimit = math.min(200, #sortedResults)
+        for i = 1, displayLimit do
+            local w = sortedResults[i]
             local row = Instance.new("TextButton", WBList)
             row.Size = UDim2.new(1, -6, 0, 22)
             row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)
@@ -1598,7 +1612,10 @@ do
             -- Check if word is from PRIMARY list for highlighting
             local isPrimary = false
             for _, pw in ipairs(PrimaryWords) do
-                if pw == w then isPrimary = true break end
+                if pw == w then 
+                    isPrimary = true 
+                    break 
+                end
             end
             lbl.Text = w
             lbl.Font = Enum.Font.Gotham
@@ -1609,7 +1626,7 @@ do
             lbl.BackgroundTransparency = 1
             lbl.TextXAlignment = Enum.TextXAlignment.Left
             
-            -- Highlight suffix matches
+            -- Highlight words that match the current suffix
             if #Config.SuffixModes > 0 then
                 for _, s in ipairs(Config.SuffixModes) do
                     if #w >= #s and w:sub(-#s) == s then
@@ -1620,6 +1637,7 @@ do
             end
         end
 
+        -- Update canvas size
         WBList.CanvasSize = UDim2.new(0,0,0, WBLayout.AbsoluteContentSize.Y)
         lastDetected = "---"
         forceUpdateList = true
