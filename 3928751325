@@ -259,88 +259,89 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     local SHORT_THRESHOLD = 5
     local MAX_WORDS = 40
     
-    local giveWords = {}
-    local shortWords = {}
-    local otherWords = {}
+    -- Get suffix priorities
+    local suffixList = Config.SuffixModes or {}
+    local suffixPriority = {}
+    for idx, s in ipairs(suffixList) do
+        suffixPriority[s] = idx
+    end
     
-    local wordData = {}
+    -- Group words by suffix match and priority
+    local suffixGroups = {}  -- priority -> {words}
+    local noSuffixWords = {}
+    local giveWords = {}
+    
     for i = 1, #wordList do
         local word = wordList[i]
         local wl = word:lower()
-        wordData[i] = {
-            word = word,
-            wl = wl,
-            len = #wl,
-            isGive = giveWordsLookup[wl] or false
-        }
-    end
-    
-    -- SEPARATE: Give words first!
-    for i = 1, #wordData do
-        local data = wordData[i]
-        if data.isGive then
-            giveWords[#giveWords + 1] = data
-        elseif data.len <= SHORT_THRESHOLD then
-            shortWords[#shortWords + 1] = data
+        
+        -- Check if it's a give word first
+        if giveWordsLookup[wl] then
+            table.insert(giveWords, {word = word, wl = wl, len = #wl})
         else
-            otherWords[#otherWords + 1] = data
+            -- Check which suffix it matches
+            local matchedSuffix = nil
+            local matchedPriority = 999
+            
+            for _, s in ipairs(suffixList) do
+                if #wl >= #s and wl:sub(-#s) == s then
+                    local p = suffixPriority[s] or 999
+                    if p < matchedPriority then
+                        matchedPriority = p
+                        matchedSuffix = s
+                    end
+                end
+            end
+            
+            if matchedSuffix then
+                if not suffixGroups[matchedPriority] then
+                    suffixGroups[matchedPriority] = {}
+                end
+                table.insert(suffixGroups[matchedPriority], {word = word, wl = wl, len = #wl})
+            else
+                -- No suffix match - regular words
+                table.insert(noSuffixWords, {word = word, wl = wl, len = #wl})
+            end
         end
     end
     
-    local function shuffle(t)
-        local n = #t
-        for i = n, 2, -1 do
-            local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
-        end
-        return t
-    end
-    
+    -- Sort each group by length (shortest first)
     local function sortByLength(a, b)
         return a.len < b.len
     end
     
-    local function limitTo40(arr)
-        local n = #arr
-        if n > MAX_WORDS then
-            local limited = {}
-            for i = 1, MAX_WORDS do
-                limited[i] = arr[i]
-            end
-            return limited
-        end
-        return arr
-    end
-    
-    -- Sort each group by length
-    table.sort(giveWords, sortByLength)
-    table.sort(shortWords, sortByLength)
-    table.sort(otherWords, sortByLength)
-    
-    -- Shuffle within each group for variety
-    giveWords = shuffle(limitTo40(giveWords))
-    shortWords = shuffle(limitTo40(shortWords))
-    otherWords = shuffle(limitTo40(otherWords))
-    
-    -- Build result: give words FIRST, then short words, then others
+    -- Build result in priority order
     local result = {}
     
-    -- Give words have highest priority
-    for i = 1, #giveWords do
+    -- 1. Give words (highest priority)
+    table.sort(giveWords, sortByLength)
+    for i = 1, math.min(MAX_WORDS, #giveWords) do
         result[#result + 1] = giveWords[i].word
+    end
+    
+    -- 2. Suffix groups in priority order
+    local sortedPriorities = {}
+    for priority, _ in pairs(suffixGroups) do
+        table.insert(sortedPriorities, priority)
+    end
+    table.sort(sortedPriorities)
+    
+    for _, priority in ipairs(sortedPriorities) do
+        local group = suffixGroups[priority]
+        table.sort(group, sortByLength)
+        for i = 1, #group do
+            if #result >= MAX_WORDS then break end
+            result[#result + 1] = group[i].word
+        end
         if #result >= MAX_WORDS then break end
     end
     
-    -- Then short words (5 letters or less)
-    for i = 1, #shortWords do
-        result[#result + 1] = shortWords[i].word
-        if #result >= MAX_WORDS then break end
-    end
-    
-    -- Finally other words
-    for i = 1, #otherWords do
-        result[#result + 1] = otherWords[i].word
-        if #result >= MAX_WORDS then break end
+    -- 3. No-suffix words (lowest priority, still sorted by length)
+    if #result < MAX_WORDS then
+        table.sort(noSuffixWords, sortByLength)
+        for i = 1, math.min(MAX_WORDS - #result, #noSuffixWords) do
+            result[#result + 1] = noSuffixWords[i].word
+        end
     end
     
     return result
@@ -1567,72 +1568,102 @@ do
         if eVal == "Ends with..." then eVal = "" end
         eVal = eVal:lower():gsub("[%s%c]+", "")
 
-        -- Update global suffixMode and lengthMode to affect main display
-        suffixMode = eVal
-        lengthMode = lVal or 0
-        Config.SuffixMode = eVal
-        Config.LengthMode = lengthMode
-        Config.SuffixModes = {}
+        -- Update suffix modes - preserve order for priority
+        local newSuffixModes = {}
         for part in eVal:gmatch("[^,]+") do
             local clean = part:gsub("[%s%c]+", "")
-            if #clean > 0 then table.insert(Config.SuffixModes, clean) end
+            if #clean > 0 then 
+                table.insert(newSuffixModes, clean)
+            end
         end
-
-        -- Update main display
-        if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
-
-        if eVal == "" and not lVal then
-            lastDetected = "---"
-            forceUpdateList = true
-            return
-        end
-
+        
+        -- Store priority order (the order they were entered)
+        Config.SuffixModes = newSuffixModes
+        Config.SuffixMode = eVal
+        Config.LengthMode = lVal or 0
+        SaveConfig()
+        
+        -- Rebuild priority lookup for sorting
         local suffixPriority = {}
         for idx, s in ipairs(Config.SuffixModes) do
             suffixPriority[s] = idx
         end
 
-        local results = {}
-        local limit = 200
-
-        -- Find words matching the suffix for the Word Browser display
+        -- Group results by suffix priority
+        local priorityResults = {}  -- priority -> {words}
+        local noSuffixResults = {}
+        local giveWordsInBrowser = {}  -- Track give words separately if needed
+        
         for _, w in ipairs(Words) do
             if not Blacklist[w] and not UsedWords[w] then
                 local matchLen = (lVal == nil or lVal == 0) or (#w == lVal)
-                local matchEnd = false
-                if eVal == "" then
-                    matchEnd = true
-                elseif #Config.SuffixModes > 1 then
-                    for _, s in ipairs(Config.SuffixModes) do
-                        if w:sub(-#s) == s then matchEnd = true break end
-                    end
-                else
-                    matchEnd = (w:sub(-#eVal) == eVal)
-                end
-
-                if matchEnd and matchLen then
-                    local bestPriority = 999
-                    for _, s in ipairs(Config.SuffixModes) do
-                        if w:sub(-#s) == s then
-                            local p = suffixPriority[s] or 999
-                            if p < bestPriority then bestPriority = p end
+                if matchLen then
+                    local matchedSuffix = nil
+                    local matchedPriority = 999
+                    
+                    -- Check which suffix this word matches (use priority order)
+                    if #Config.SuffixModes > 0 then
+                        for _, s in ipairs(Config.SuffixModes) do
+                            if #w >= #s and w:sub(-#s) == s then
+                                local p = suffixPriority[s] or 999
+                                if p < matchedPriority then
+                                    matchedPriority = p
+                                    matchedSuffix = s
+                                end
+                            end
                         end
                     end
-                    table.insert(results, {word = w, priority = bestPriority})
-                    if #results >= limit then break end
+                    
+                    if matchedSuffix and #Config.SuffixModes > 0 then
+                        -- Word matches a suffix - add to priority group
+                        if not priorityResults[matchedPriority] then
+                            priorityResults[matchedPriority] = {}
+                        end
+                        table.insert(priorityResults[matchedPriority], w)
+                    elseif eVal == "" then
+                        -- No suffix filter, show all words (priority 0 = highest)
+                        if not priorityResults[0] then
+                            priorityResults[0] = {}
+                        end
+                        table.insert(priorityResults[0], w)
+                    else
+                        -- Word doesn't match any suffix but we have suffixes set
+                        -- These go to the end (priority 999)
+                        if not priorityResults[999] then
+                            priorityResults[999] = {}
+                        end
+                        table.insert(priorityResults[999], w)
+                    end
                 end
             end
         end
-
-        -- Sort results by priority then length
-        table.sort(results, function(a, b)
-            if a.priority ~= b.priority then return a.priority < b.priority end
-            if #a.word ~= #b.word then return #a.word < #b.word end
-            return false
-        end)
-
-        for i, entry in ipairs(results) do
-            local w = entry.word
+        
+        -- Build sorted results by priority, then by length within each group
+        local sortedResults = {}
+        local priorities = {}
+        for p, _ in pairs(priorityResults) do
+            table.insert(priorities, p)
+        end
+        table.sort(priorities)  -- Sort priorities numerically (0, then 1,2,3..., then 999)
+        
+        for _, p in ipairs(priorities) do
+            local group = priorityResults[p]
+            -- Sort by length (shortest first) within each priority group
+            table.sort(group, function(a, b) 
+                if #a ~= #b then 
+                    return #a < #b 
+                end
+                return a < b  -- Alphabetical tiebreaker
+            end)
+            for _, word in ipairs(group) do
+                table.insert(sortedResults, word)
+                if #sortedResults >= 200 then break end
+            end
+            if #sortedResults >= 200 then break end
+        end
+        
+        -- Display the sorted results
+        for i, w in ipairs(sortedResults) do
             local row = Instance.new("TextButton", WBList)
             row.Size = UDim2.new(1, -6, 0, 22)
             row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)
@@ -1644,6 +1675,10 @@ do
                 task.delay(0.2, function()
                     Tween(row, {BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)}, 0.2)
                 end)
+                -- Optional: Copy to clipboard or auto-fill search
+                if SearchBox then
+                    SearchBox.Text = w
+                end
             end)
             local lbl = Instance.new("TextLabel", row)
             lbl.Text = w
@@ -1654,13 +1689,39 @@ do
             lbl.Position = UDim2.new(0, 5, 0, 0)
             lbl.BackgroundTransparency = 1
             lbl.TextXAlignment = Enum.TextXAlignment.Left
+            
+            -- Highlight words that match the current suffix (for visual feedback)
+            if #Config.SuffixModes > 0 then
+                for _, s in ipairs(Config.SuffixModes) do
+                    if #w >= #s and w:sub(-#s) == s then
+                        lbl.TextColor3 = THEME.Accent
+                        break
+                    end
+                end
+            end
         end
 
+        -- Update canvas size
         WBList.CanvasSize = UDim2.new(0,0,0, WBLayout.AbsoluteContentSize.Y)
         lastDetected = "---"
         forceUpdateList = true
+        
+        -- Show toast with suffix priority info
+        if #Config.SuffixModes > 0 then
+            local priorityText = ""
+            for i, s in ipairs(Config.SuffixModes) do
+                if i > 1 then priorityText = priorityText .. ", " end
+                priorityText = priorityText .. s .. " (#" .. i .. ")"
+            end
+            ShowToast("Suffix Priority: " .. priorityText, "success")
+        end
+        
+        -- Update main UI immediately
+        if UpdateList then 
+            UpdateList(lastDetected, lastRequiredLetter)
+        end
     end
-
+    
     WBSearchBtn.MouseButton1Click:Connect(SearchWords)
     WBEndBox.FocusLost:Connect(function(enter) if enter then SearchWords() end end)
     WBLengthBox.FocusLost:Connect(function(enter) if enter then SearchWords() end end)
@@ -1829,17 +1890,75 @@ UpdateList = function(detectedText, requiredLetter)
 
     if #matches > 0 then
         local filtered = {}
-        local padding = {}
+        local noSuffixMatches = {}
+        
+        -- Get suffix priorities from Config
+        local suffixList = Config.SuffixModes or {}
+        local suffixPriority = {}
+        for idx, s in ipairs(suffixList) do
+            suffixPriority[s] = idx
+        end
+        
+        -- Create priority groups based on suffix matches
+        local priorityGroups = {}  -- priority -> {words}
+        
         for _, w in ipairs(matches) do
-            if CheckSuffix(w) and (lengthMode == 0 or #w == lengthMode) then
-                table.insert(filtered, w)
+            local wl = w:lower()
+            local matchedSuffix = nil
+            local matchedPriority = 999
+            
+            -- Check which suffix this word matches
+            if #suffixList > 0 then
+                for _, s in ipairs(suffixList) do
+                    if #wl >= #s and wl:sub(-#s) == s then
+                        local p = suffixPriority[s] or 999
+                        if p < matchedPriority then
+                            matchedPriority = p
+                            matchedSuffix = s
+                        end
+                    end
+                end
+            end
+            
+            if matchedSuffix and #suffixList > 0 then
+                -- Word matches a suffix - add to priority group
+                if not priorityGroups[matchedPriority] then
+                    priorityGroups[matchedPriority] = {}
+                end
+                table.insert(priorityGroups[matchedPriority], w)
             else
-                table.insert(padding, w)
+                -- No suffix match
+                if lengthMode == 0 or #w == lengthMode then
+                    table.insert(noSuffixMatches, w)
+                end
             end
         end
         
-        -- Apply sort modes
+        -- Build filtered list in priority order
+        local sortedPriorities = {}
+        for priority, _ in pairs(priorityGroups) do
+            table.insert(sortedPriorities, priority)
+        end
+        table.sort(sortedPriorities)
+        
+        -- Add priority groups in order (sorted by length within each group)
+        for _, priority in ipairs(sortedPriorities) do
+            local group = priorityGroups[priority]
+            -- Sort by length (shortest first) within each suffix group
+            table.sort(group, function(a, b) return #a < #b end)
+            for _, word in ipairs(group) do
+                table.insert(filtered, word)
+            end
+        end
+        
+        -- Add no-suffix matches at the end
+        for _, word in ipairs(noSuffixMatches) do
+            table.insert(filtered, word)
+        end
+        
+        -- Now apply the selected sort mode to the filtered list
         if sortMode == "Strategic" then
+            -- Pass filtered to StrategicSort (which handles give words, short words, etc.)
             filtered = StrategicSort(filtered, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
             -- Split words into give words and regular words
@@ -2004,21 +2123,7 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        table.sort(padding, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return false
-        end)
-        if #padding > 40 then
-            local limitedPadding = {}
-            for i = 1, 40 do
-                table.insert(limitedPadding, padding[i])
-            end
-            padding = limitedPadding
-        end
-    
-        matches = {}
-        for _, w in ipairs(filtered) do table.insert(matches, w) end
-        for _, w in ipairs(padding) do table.insert(matches, w) end
+        matches = filtered
     end
 
     local displayList = {}
