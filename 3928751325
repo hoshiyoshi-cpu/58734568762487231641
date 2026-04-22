@@ -1773,7 +1773,7 @@ UpdateList = function(detectedText, requiredLetter)
         
         -- If we have enough primary matches, don't search fallback
         if #exacts < MAX_RESULTS then
-            -- THEN: Search FALLBACK words (lastletter.txt)
+            -- THEN: Search FALLBACK words (lastletter.txt) - ONLY if needed
             local fallbackExacts = getMatchesFromBucket(FallbackWords, prefix, prefixLen, prefixFirstChar, ignoreLengthFilter, MAX_RESULTS - #exacts)
             for _, w in ipairs(fallbackExacts) do
                 -- Avoid duplicates
@@ -1810,7 +1810,7 @@ UpdateList = function(detectedText, requiredLetter)
                 end
             end
             
-            -- If still no partials, check fallback
+            -- If still no partials, check fallback (ONLY if needed)
             if #partials == 0 then
                 for _, w in ipairs(FallbackWords) do
                     if prefixFirstChar ~= "" and w:sub(1,1) ~= prefixFirstChar then
@@ -1864,7 +1864,7 @@ UpdateList = function(detectedText, requiredLetter)
                     end
                 end
             end
-            -- If not enough, search ALL
+            -- If not enough, search FALLBACK (ONLY if needed)
             if #matches < 200 then
                 local allBucket = Buckets[reqChar] or {}
                 for _, w in ipairs(allBucket) do
@@ -1902,33 +1902,31 @@ UpdateList = function(detectedText, requiredLetter)
         local function getWordPriority(w)
             local wl = w:lower()
             local bestPriority = 999
-            local bestSuffix = nil
             for _, s in ipairs(suffixList) do
                 if #wl >= #s and wl:sub(-#s) == s then
                     local p = suffixPriority[s] or 999
                     if p < bestPriority then
                         bestPriority = p
-                        bestSuffix = s
                     end
                 end
             end
-            return bestPriority, bestSuffix
+            return bestPriority
         end
         
-        -- FIRST: Separate suffix matches (ALL of them, we'll limit later)
+        -- Separate suffix matches
         local allSuffixMatches = {}  -- {priority, word}
         local nonSuffixMatches = {}
         
         for _, word in ipairs(matches) do
-            local priority, suffix = getWordPriority(word)
+            local priority = getWordPriority(word)
             if priority < 999 then
-                table.insert(allSuffixMatches, {priority = priority, suffix = suffix, word = word})
+                table.insert(allSuffixMatches, {priority = priority, word = word})
             else
                 table.insert(nonSuffixMatches, word)
             end
         end
         
-        -- Sort suffix matches by priority (lower number = higher priority)
+        -- Sort suffix matches by priority and length
         table.sort(allSuffixMatches, function(a, b)
             if a.priority ~= b.priority then
                 return a.priority < b.priority
@@ -1936,281 +1934,46 @@ UpdateList = function(detectedText, requiredLetter)
             return #a.word < #b.word
         end)
         
-        -- Take top 3 suffix matches TOTAL
+        -- Take top 3 suffix matches
         local MAX_SUFFIX_RESULTS = 3
         local topSuffixWords = {}
         for i = 1, math.min(MAX_SUFFIX_RESULTS, #allSuffixMatches) do
             table.insert(topSuffixWords, allSuffixMatches[i].word)
         end
         
-        -- Now apply sort mode to non-suffix matches
+        -- Apply the selected sort mode to non-suffix matches
+        local sortedNonSuffix = {}
         if sortMode == "Strategic" then
-            local SHORT_THRESHOLD = 5
-            local MAX_WORDS = 40
-            
-            local primaryNonSuffix = {}
-            local fallbackNonSuffix = {}
-            local shortWords = {}
-            local otherWords = {}
-            
-            -- Separate primary vs fallback in non-suffix matches
-            for _, word in ipairs(nonSuffixMatches) do
-                local isPrimary = false
-                for _, pw in ipairs(PrimaryWords) do
-                    if pw == word then isPrimary = true break end
-                end
-                
-                if isPrimary then
-                    table.insert(primaryNonSuffix, word)
-                else
-                    table.insert(fallbackNonSuffix, word)
-                end
-            end
-            
-            -- Process primary non-suffix first
-            for _, word in ipairs(primaryNonSuffix) do
-                if #word <= SHORT_THRESHOLD then
-                    table.insert(shortWords, word)
-                else
-                    table.insert(otherWords, word)
-                end
-            end
-            
-            -- Then fallback non-suffix
-            for _, word in ipairs(fallbackNonSuffix) do
-                if #word <= SHORT_THRESHOLD then
-                    table.insert(shortWords, word)
-                else
-                    table.insert(otherWords, word)
-                end
-            end
-            
-            local function sortByLength(a, b) return #a < #b end
-            table.sort(shortWords, sortByLength)
-            table.sort(otherWords, sortByLength)
-            
-            local function shuffle(t)
-                for i = #t, 2, -1 do
-                    local j = math.random(i)
-                    t[i], t[j] = t[j], t[i]
-                end
-                return t
-            end
-            
-            local result = {}
-            
-            -- Suffix matches FIRST (top 3)
-            for _, word in ipairs(topSuffixWords) do
-                if #result >= MAX_WORDS then break end
-                table.insert(result, word)
-            end
-            
-            -- Short words
-            for _, word in ipairs(shuffle(shortWords)) do
-                if #result >= MAX_WORDS then break end
-                table.insert(result, word)
-            end
-            
-            -- Other words
-            for _, word in ipairs(shuffle(otherWords)) do
-                if #result >= MAX_WORDS then break end
-                table.insert(result, word)
-            end
-            
-            matches = result
-            
+            sortedNonSuffix = StrategicSort(nonSuffixMatches, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            local primaryWords = {}
-            local fallbackWords = {}
-            
-            for _, word in ipairs(nonSuffixMatches) do
-                local isPrimary = false
-                for _, pw in ipairs(PrimaryWords) do
-                    if pw == word then isPrimary = true break end
-                end
-                if isPrimary then
-                    table.insert(primaryWords, word)
-                else
-                    table.insert(fallbackWords, word)
-                end
-            end
-            
-            local function sortByLength(a, b) 
+            -- Sort by length (shortest first)
+            table.sort(nonSuffixMatches, function(a, b)
                 if #a ~= #b then return #a < #b end
                 return a < b
-            end
-            table.sort(primaryWords, sortByLength)
-            table.sort(fallbackWords, sortByLength)
-            
-            local result = {}
-            
-            -- Suffix matches FIRST (top 3)
-            for _, word in ipairs(topSuffixWords) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            -- Primary words
-            for _, word in ipairs(primaryWords) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            -- Fallback words
-            for _, word in ipairs(fallbackWords) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            matches = result
-            
+            end)
+            sortedNonSuffix = nonSuffixMatches
         elseif sortMode == "Random" then
-            -- Filter by length mode FIRST
-            local lengthFiltered = {}
-            for _, word in ipairs(nonSuffixMatches) do
-                if lengthMode == 0 or #word == lengthMode then
-                    table.insert(lengthFiltered, word)
-                end
-            end
-            
-            -- Shuffle remaining words
-            for i = #lengthFiltered, 2, -1 do
+            -- Shuffle randomly
+            for i = #nonSuffixMatches, 2, -1 do
                 local j = math.random(i)
-                lengthFiltered[i], lengthFiltered[j] = lengthFiltered[j], lengthFiltered[i]
+                nonSuffixMatches[i], nonSuffixMatches[j] = nonSuffixMatches[j], nonSuffixMatches[i]
             end
-            
-            -- Group by length for ordered display
-            local lengthGroups = {}
-            local orderTracker = {}
-            
-            for _, word in ipairs(lengthFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(orderTracker)
-            
-            local result = {}
-            
-            -- Suffix matches FIRST (top 3)
-            for _, word in ipairs(topSuffixWords) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            -- Then other words grouped by length
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    if #result >= 40 then break end
-                    table.insert(result, word)
-                end
-                if #result >= 40 then break end
-            end
-            
-            matches = result
-            
+            sortedNonSuffix = nonSuffixMatches
         elseif sortMode == "Smart" then
-            local SHORT_THRESHOLD = 6
-            local primaryShort = {}
-            local primaryLong = {}
-            local fallbackShort = {}
-            local fallbackLong = {}
-            
-            for _, word in ipairs(nonSuffixMatches) do
-                local isPrimary = false
-                for _, pw in ipairs(PrimaryWords) do
-                    if pw == word then isPrimary = true break end
-                end
-                
-                if isPrimary then
-                    if #word <= SHORT_THRESHOLD then
-                        table.insert(primaryShort, word)
-                    else
-                        table.insert(primaryLong, word)
-                    end
-                else
-                    if #word <= SHORT_THRESHOLD then
-                        table.insert(fallbackShort, word)
-                    else
-                        table.insert(fallbackLong, word)
-                    end
-                end
-            end
-            
-            -- Shuffle within groups
-            for i = #primaryShort, 2, -1 do
-                local j = math.random(i)
-                primaryShort[i], primaryShort[j] = primaryShort[j], primaryShort[i]
-            end
-            for i = #primaryLong, 2, -1 do
-                local j = math.random(i)
-                primaryLong[i], primaryLong[j] = primaryLong[j], primaryLong[i]
-            end
-            for i = #fallbackShort, 2, -1 do
-                local j = math.random(i)
-                fallbackShort[i], fallbackShort[j] = fallbackShort[j], fallbackShort[i]
-            end
-            for i = #fallbackLong, 2, -1 do
-                local j = math.random(i)
-                fallbackLong[i], fallbackLong[j] = fallbackLong[j], fallbackLong[i]
-            end
-            
-            -- Group short words by length
-            local lengthGroups = {}
-            local orderTracker = {}
-            for _, word in ipairs(primaryShort) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            for _, word in ipairs(fallbackShort) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            table.sort(orderTracker)
-            
-            local result = {}
-            
-            -- Suffix matches FIRST (top 3)
-            for _, word in ipairs(topSuffixWords) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            -- Short words by length
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    if #result >= 40 then break end
-                    table.insert(result, word)
-                end
-                if #result >= 40 then break end
-            end
-            
-            -- Primary long words
-            for _, word in ipairs(primaryLong) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            -- Fallback long words
-            for _, word in ipairs(fallbackLong) do
-                if #result >= 40 then break end
-                table.insert(result, word)
-            end
-            
-            matches = result
+            sortedNonSuffix = SmartSort(nonSuffixMatches, searchPrefix, UsedWords)
         end
+        
+        -- Combine: top suffix matches first, then sorted non-suffix matches
+        local result = {}
+        for _, word in ipairs(topSuffixWords) do
+            table.insert(result, word)
+        end
+        for _, word in ipairs(sortedNonSuffix) do
+            if #result >= 40 then break end
+            table.insert(result, word)
+        end
+        
+        matches = result
     end
 
     local displayList = {}
