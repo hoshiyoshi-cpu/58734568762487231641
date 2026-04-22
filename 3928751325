@@ -2123,95 +2123,156 @@ UpdateList = function(detectedText, requiredLetter)
             suffixPriority[s] = idx
         end
         
-        -- Calculate suffix priority for a word
-        local function getWordPriority(w)
-            local wl = w:lower()
-            local bestPriority = 999
-            for _, s in ipairs(suffixList) do
-                if #wl >= #s and wl:sub(-#s) == s then
-                    local p = suffixPriority[s] or 999
-                    if p < bestPriority then
-                        bestPriority = p
+        -- Store used suffix words to track replacement
+        if not UsedSuffixWords then UsedSuffixWords = {} end
+        
+        -- For each suffix, get the best available word (shortest, not used)
+        local function getBestWordForSuffix(wordList, suffix, usedSet)
+            local bestWord = nil
+            local bestLen = 999
+            for _, word in ipairs(wordList) do
+                local wl = word:lower()
+                if #wl >= #suffix and wl:sub(-#suffix) == suffix then
+                    if not usedSet[word] and not Blacklist[word] then
+                        if #word < bestLen then
+                            bestLen = #word
+                            bestWord = word
+                        end
                     end
                 end
             end
-            return bestPriority
+            return bestWord
         end
         
-        -- Extract top suffix matches from a list (max 3 total across both lists)
-        local function getTopSuffixMatches(wordList, maxCount)
-            local suffixMatches = {}
-            for _, word in ipairs(wordList) do
-                local priority = getWordPriority(word)
-                if priority < 999 then
-                    table.insert(suffixMatches, {priority = priority, word = word})
+        -- Get top suffix words (1 per suffix, in priority order)
+        local topSuffixWords = {}
+        local usedThisRound = {}
+        
+        -- FIRST: Try to get from PRIMARY words
+        for _, suffix in ipairs(suffixList) do
+            local suffixKey = suffix
+            -- Check if we already have a word for this suffix that's not used
+            local currentWord = UsedSuffixWords[suffixKey]
+            if currentWord and not UsedWords[currentWord] and not Blacklist[currentWord] then
+                -- Still valid, keep it
+                local stillExists = false
+                for _, w in ipairs(primaryMatches) do
+                    if w == currentWord then stillExists = true break end
+                end
+                if stillExists then
+                    table.insert(topSuffixWords, currentWord)
+                    usedThisRound[currentWord] = true
+                else
+                    -- Word no longer available, find new one
+                    local newWord = getBestWordForSuffix(primaryMatches, suffix, usedThisRound)
+                    if newWord then
+                        UsedSuffixWords[suffixKey] = newWord
+                        table.insert(topSuffixWords, newWord)
+                        usedThisRound[newWord] = true
+                    end
+                end
+            else
+                -- Need a new word for this suffix
+                local newWord = getBestWordForSuffix(primaryMatches, suffix, usedThisRound)
+                if newWord then
+                    UsedSuffixWords[suffixKey] = newWord
+                    table.insert(topSuffixWords, newWord)
+                    usedThisRound[newWord] = true
                 end
             end
-            table.sort(suffixMatches, function(a, b)
-                if a.priority ~= b.priority then return a.priority < b.priority end
-                return #a.word < #b.word
-            end)
-            local result = {}
-            for i = 1, math.min(maxCount, #suffixMatches) do
-                table.insert(result, suffixMatches[i].word)
-            end
-            return result
         end
         
-        -- Get top 3 suffix matches from PRIMARY first, then FALLBACK if needed
-        local topSuffixWords = getTopSuffixMatches(primaryMatches, 3)
-        if #topSuffixWords < 3 then
-            local remaining = 3 - #topSuffixWords
-            local fallbackSuffix = getTopSuffixMatches(fallbackMatches, remaining)
-            for _, word in ipairs(fallbackSuffix) do
-                table.insert(topSuffixWords, word)
+        -- If any suffixes still don't have words, try FALLBACK
+        for i, suffix in ipairs(suffixList) do
+            if i > #topSuffixWords or topSuffixWords[i] == nil then
+                local newWord = getBestWordForSuffix(fallbackMatches, suffix, usedThisRound)
+                if newWord then
+                    local suffixKey = suffix
+                    UsedSuffixWords[suffixKey] = newWord
+                    if i <= #topSuffixWords then
+                        topSuffixWords[i] = newWord
+                    else
+                        table.insert(topSuffixWords, newWord)
+                    end
+                    usedThisRound[newWord] = true
+                end
             end
         end
         
-        -- Sort PRIMARY matches according to mode
+        -- Remove nil entries
+        local cleanedSuffixWords = {}
+        for _, word in ipairs(topSuffixWords) do
+            if word then
+                table.insert(cleanedSuffixWords, word)
+            end
+        end
+        topSuffixWords = cleanedSuffixWords
+        
+        -- Remove suffix words from primary and fallback matches so they don't appear twice
+        local function removeWordsFromList(list, wordsToRemove)
+            local newList = {}
+            for _, word in ipairs(list) do
+                local shouldRemove = false
+                for _, removeWord in ipairs(wordsToRemove) do
+                    if word == removeWord then
+                        shouldRemove = true
+                        break
+                    end
+                end
+                if not shouldRemove then
+                    table.insert(newList, word)
+                end
+            end
+            return newList
+        end
+        
+        local primaryRemaining = removeWordsFromList(primaryMatches, topSuffixWords)
+        local fallbackRemaining = removeWordsFromList(fallbackMatches, topSuffixWords)
+        
+        -- Sort PRIMARY remaining according to mode
         local sortedPrimary = {}
         if sortMode == "Strategic" then
-            sortedPrimary = StrategicSort(primaryMatches, searchPrefix, UsedWords)
+            sortedPrimary = StrategicSort(primaryRemaining, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            table.sort(primaryMatches, function(a, b)
+            table.sort(primaryRemaining, function(a, b)
                 if #a ~= #b then return #a < #b end
                 return a < b
             end)
-            sortedPrimary = primaryMatches
+            sortedPrimary = primaryRemaining
         elseif sortMode == "Random" then
-            for i = #primaryMatches, 2, -1 do
+            for i = #primaryRemaining, 2, -1 do
                 local j = math.random(i)
-                primaryMatches[i], primaryMatches[j] = primaryMatches[j], primaryMatches[i]
+                primaryRemaining[i], primaryRemaining[j] = primaryRemaining[j], primaryRemaining[i]
             end
-            sortedPrimary = primaryMatches
+            sortedPrimary = primaryRemaining
         elseif sortMode == "Smart" then
-            sortedPrimary = SmartSort(primaryMatches, searchPrefix, UsedWords)
+            sortedPrimary = SmartSort(primaryRemaining, searchPrefix, UsedWords)
         end
         
-        -- Sort FALLBACK matches according to mode
+        -- Sort FALLBACK remaining according to mode
         local sortedFallback = {}
         if sortMode == "Strategic" then
-            sortedFallback = StrategicSort(fallbackMatches, searchPrefix, UsedWords)
+            sortedFallback = StrategicSort(fallbackRemaining, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            table.sort(fallbackMatches, function(a, b)
+            table.sort(fallbackRemaining, function(a, b)
                 if #a ~= #b then return #a < #b end
                 return a < b
             end)
-            sortedFallback = fallbackMatches
+            sortedFallback = fallbackRemaining
         elseif sortMode == "Random" then
-            for i = #fallbackMatches, 2, -1 do
+            for i = #fallbackRemaining, 2, -1 do
                 local j = math.random(i)
-                fallbackMatches[i], fallbackMatches[j] = fallbackMatches[j], fallbackMatches[i]
+                fallbackRemaining[i], fallbackRemaining[j] = fallbackRemaining[j], fallbackRemaining[i]
             end
-            sortedFallback = fallbackMatches
+            sortedFallback = fallbackRemaining
         elseif sortMode == "Smart" then
-            sortedFallback = SmartSort(fallbackMatches, searchPrefix, UsedWords)
+            sortedFallback = SmartSort(fallbackRemaining, searchPrefix, UsedWords)
         end
         
-        -- Combine: Top suffix matches (from both) -> PRIMARY sorted -> FALLBACK sorted
+        -- Combine: Suffix words (1 per suffix) -> PRIMARY sorted -> FALLBACK sorted
         local result = {}
         
-        -- Add top 3 suffix matches (these could be from PRIMARY or FALLBACK)
+        -- Add suffix words (1 per suffix in priority order)
         for _, word in ipairs(topSuffixWords) do
             if #result >= 40 then break end
             table.insert(result, word)
@@ -2220,26 +2281,13 @@ UpdateList = function(detectedText, requiredLetter)
         -- Add PRIMARY words
         for _, word in ipairs(sortedPrimary) do
             if #result >= 40 then break end
-            -- Don't duplicate suffix matches that are already added
-            local isDuplicate = false
-            for _, existing in ipairs(result) do
-                if existing == word then isDuplicate = true break end
-            end
-            if not isDuplicate then
-                table.insert(result, word)
-            end
+            table.insert(result, word)
         end
         
         -- Add FALLBACK words
         for _, word in ipairs(sortedFallback) do
             if #result >= 40 then break end
-            local isDuplicate = false
-            for _, existing in ipairs(result) do
-                if existing == word then isDuplicate = true break end
-            end
-            if not isDuplicate then
-                table.insert(result, word)
-            end
+            table.insert(result, word)
         end
         
         matches = result
