@@ -1923,7 +1923,6 @@ UpdateList = function(detectedText, requiredLetter)
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
 
-    local matches = {}
     local searchPrefix = detectedText
     local isBacktracked = false
     local manualSearch = false
@@ -1949,295 +1948,173 @@ UpdateList = function(detectedText, requiredLetter)
         firstChar = requiredLetter:sub(1,1):lower()
     end
 
-    -- Function to collect matches from a specific word list
-    local function CollectMatchesFromList(wordList, prefix, ignoreLengthFilter, maxResults)
-        local exacts = {}
-        local prefixLen = #prefix
-        local prefixFirstChar = prefixLen > 0 and prefix:sub(1,1) or ""
-        
-        for _, w in ipairs(wordList) do
-            if prefixFirstChar ~= "" and w:sub(1,1) ~= prefixFirstChar then
-                -- skip
-            elseif lengthMode > 0 and not ignoreLengthFilter and #w ~= lengthMode then
-                -- skip
-            elseif Blacklist[w] or UsedWords[w] then
-                -- skip
-            else
-                if w:sub(1, prefixLen) == prefix then
-                    table.insert(exacts, w)
-                    if #exacts >= maxResults then break end
-                end
-            end
-        end
-        return exacts
-    end
-    
-    -- Function to collect partial matches
-    local function CollectPartialMatchesFromList(wordList, prefix, ignoreLengthFilter, maxResults)
-        local partials = {}
-        local maxPartialLen = 0
-        local prefixLen = #prefix
-        local prefixFirstChar = prefixLen > 0 and prefix:sub(1,1) or ""
-        
-        for _, w in ipairs(wordList) do
-            if prefixFirstChar ~= "" and w:sub(1,1) ~= prefixFirstChar then
-                -- skip
-            elseif lengthMode > 0 and not ignoreLengthFilter and #w ~= lengthMode then
-                -- skip
-            elseif Blacklist[w] or UsedWords[w] then
-                -- skip
-            else
-                local mLen = GetMatchLength(w, prefix)
-                if mLen > maxPartialLen then
-                    maxPartialLen = mLen
-                    partials = {w}
-                elseif mLen == maxPartialLen and mLen > 0 then
-                    if #partials < maxResults then 
-                        table.insert(partials, w)
-                    end
-                end
-            end
-        end
-        
-        return partials, maxPartialLen
-    end
-    
-    -- Collect matches: PRIMARY first, then FALLBACK if needed
-    local exacts = {}
-    local primaryExacts = CollectMatchesFromList(PrimaryWords, searchPrefix, false, 200)
-    for _, w in ipairs(primaryExacts) do
-        table.insert(exacts, w)
-    end
-    
-    -- Only search fallback if we don't have enough primary matches
-    if #exacts < 200 then
-        local fallbackExacts = CollectMatchesFromList(FallbackWords, searchPrefix, false, 200 - #exacts)
-        for _, w in ipairs(fallbackExacts) do
-            local duplicate = false
-            for _, existing in ipairs(exacts) do
-                if existing == w then duplicate = true break end
-            end
-            if not duplicate then
-                table.insert(exacts, w)
-            end
-        end
-    end
-    
-    local partials = {}
-    local pLen = 0
-    
-    if #exacts == 0 then
-        -- Try partial matches from PRIMARY first
-        local primaryPartials, primaryPLen = CollectPartialMatchesFromList(PrimaryWords, searchPrefix, false, 200)
-        if #primaryPartials > 0 then
-            partials = primaryPartials
-            pLen = primaryPLen
-        else
-            -- Then try FALLBACK
-            local fallbackPartials, fallbackPLen = CollectPartialMatchesFromList(FallbackWords, searchPrefix, false, 200)
-            partials = fallbackPartials
-            pLen = fallbackPLen
-        end
-    end
-    
-    -- If length mode is on and no exacts, try ignoring length filter
-    if #exacts == 0 and lengthMode > 0 then
-        local primaryExactsLen = CollectMatchesFromList(PrimaryWords, searchPrefix, true, 200)
-        if #primaryExactsLen > 0 then
-            exacts = primaryExactsLen
-        else
-            local fallbackExactsLen = CollectMatchesFromList(FallbackWords, searchPrefix, true, 200)
-            exacts = fallbackExactsLen
-        end
+    -- Get the bucket for this prefix
+    local bucket
+    if firstChar and firstChar ~= "" and Buckets then
+        bucket = Buckets[firstChar] or {}
+    else
+        bucket = AllWords
     end
 
-    if #exacts > 0 then
-        matches = exacts
-    elseif #partials > 0 then
-        matches = partials
-        searchPrefix = searchPrefix:sub(1, pLen)
-        isBacktracked = true
-    elseif requiredLetter and #requiredLetter > 0 then
-        local reqChar = requiredLetter:sub(1,1):lower()
-        if searchPrefix:sub(1,1):lower() ~= reqChar then
-            -- Search PRIMARY first
-            local primaryBucket = PrimaryBuckets[reqChar] or {}
-            for _, w in ipairs(primaryBucket) do
+    -- FIRST: Find ALL words that match the prefix from the bucket
+    local prefixMatches = {}
+    local prefixLen = #searchPrefix
+    
+    for _, w in ipairs(bucket) do
+        if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
+            if lengthMode == 0 or #w == lengthMode then
                 if not Blacklist[w] and not UsedWords[w] then
-                    local mLen = GetMatchLength(w, requiredLetter)
-                    if mLen == #requiredLetter then
-                        table.insert(matches, w)
-                        if #matches >= 200 then break end
-                    end
+                    table.insert(prefixMatches, w)
                 end
-            end
-            -- If not enough, search FALLBACK
-            if #matches < 200 then
-                local allBucket = Buckets[reqChar] or {}
-                for _, w in ipairs(allBucket) do
-                    if not Blacklist[w] and not UsedWords[w] then
-                        local duplicate = false
-                        for _, existing in ipairs(matches) do
-                            if existing == w then duplicate = true break end
-                        end
-                        if not duplicate then
-                            local mLen = GetMatchLength(w, requiredLetter)
-                            if mLen == #requiredLetter then
-                                table.insert(matches, w)
-                                if #matches >= 200 then break end
-                            end
-                        end
-                    end
-                end
-            end
-            if #matches > 0 then
-                searchPrefix = requiredLetter
-                isBacktracked = true
             end
         end
     end
+    
+    -- If no exact matches, try partial matches
+    if #prefixMatches == 0 then
+        local maxPartialLen = 0
+        for _, w in ipairs(bucket) do
+            if not Blacklist[w] and not UsedWords[w] then
+                if lengthMode == 0 or #w == lengthMode then
+                    local mLen = GetMatchLength(w, searchPrefix)
+                    if mLen > maxPartialLen then
+                        maxPartialLen = mLen
+                        prefixMatches = {w}
+                    elseif mLen == maxPartialLen and mLen > 0 then
+                        table.insert(prefixMatches, w)
+                    end
+                end
+            end
+        end
+        if #prefixMatches > 0 then
+            searchPrefix = searchPrefix:sub(1, maxPartialLen)
+            isBacktracked = true
+        end
+    end
+    
+    -- Handle required letter fallback
+    if #prefixMatches == 0 and requiredLetter and #requiredLetter > 0 then
+        local reqChar = requiredLetter:sub(1,1):lower()
+        local reqBucket = Buckets[reqChar] or {}
+        for _, w in ipairs(reqBucket) do
+            if not Blacklist[w] and not UsedWords[w] then
+                if w:sub(1, #requiredLetter) == requiredLetter then
+                    table.insert(prefixMatches, w)
+                end
+            end
+        end
+        if #prefixMatches > 0 then
+            searchPrefix = requiredLetter
+            isBacktracked = true
+        end
+    end
 
-    if #matches > 0 then
-        -- Split matches into PRIMARY and FALLBACK groups
+    if #prefixMatches > 0 then
+        -- Split into PRIMARY and FALLBACK
+        local primarySet = {}
+        for _, w in ipairs(PrimaryWords) do primarySet[w] = true end
+        
         local primaryMatches = {}
         local fallbackMatches = {}
-        
-        -- Create a lookup set for primary words for O(1) checking
-        local primarySet = {}
-        for _, w in ipairs(PrimaryWords) do
-            primarySet[w] = true
-        end
-        
-        for _, word in ipairs(matches) do
-            if primarySet[word] then
-                table.insert(primaryMatches, word)
+        for _, w in ipairs(prefixMatches) do
+            if primarySet[w] then
+                table.insert(primaryMatches, w)
             else
-                table.insert(fallbackMatches, word)
+                table.insert(fallbackMatches, w)
             end
         end
         
-        -- Get suffix priorities
+        -- Get suffix list
         local suffixList = Config.SuffixModes or {}
-        local suffixPriority = {}
-        for idx, s in ipairs(suffixList) do
-            suffixPriority[s] = idx
-        end
         
-        -- Store used suffix words to track replacement
+        -- TRACK used suffix words
         if not UsedSuffixWords then UsedSuffixWords = {} end
         
-        -- For each suffix, get the best available word (shortest, not used)
-        local function getBestWordForSuffix(wordList, suffix, usedSet)
-            local bestWord = nil
+        -- Helper: Find shortest word with given suffix from a list
+        local function findShortestWithSuffix(wordList, suffix, excludeSet)
+            local best = nil
             local bestLen = 999
-            for _, word in ipairs(wordList) do
-                local wl = word:lower()
-                if #wl >= #suffix and wl:sub(-#suffix) == suffix then
-                    if not usedSet[word] and not Blacklist[word] then
-                        if #word < bestLen then
-                            bestLen = #word
-                            bestWord = word
+            for _, w in ipairs(wordList) do
+                if not excludeSet[w] and not UsedWords[w] and not Blacklist[w] then
+                    if #w >= #suffix and w:sub(-#suffix) == suffix then
+                        if #w < bestLen then
+                            bestLen = #w
+                            best = w
                         end
                     end
                 end
             end
-            return bestWord
+            return best
         end
         
-        -- Get top suffix words (1 per suffix, in priority order)
-        local topSuffixWords = {}
-        local usedThisRound = {}
+        -- STEP 1: Get suffix words (1 per suffix) from PRIMARY first
+        local suffixWords = {}
+        local usedInSuffix = {}
         
-        -- FIRST: Try to get from PRIMARY words
         for _, suffix in ipairs(suffixList) do
-            local suffixKey = suffix
-            -- Check if we already have a word for this suffix that's not used
-            local currentWord = UsedSuffixWords[suffixKey]
-            if currentWord and not UsedWords[currentWord] and not Blacklist[currentWord] then
-                -- Still valid, keep it
-                local stillExists = false
+            local cached = UsedSuffixWords[suffix]
+            -- Check if cached word is still valid
+            local valid = false
+            if cached then
                 for _, w in ipairs(primaryMatches) do
-                    if w == currentWord then stillExists = true break end
-                end
-                if stillExists then
-                    table.insert(topSuffixWords, currentWord)
-                    usedThisRound[currentWord] = true
-                else
-                    -- Word no longer available, find new one
-                    local newWord = getBestWordForSuffix(primaryMatches, suffix, usedThisRound)
-                    if newWord then
-                        UsedSuffixWords[suffixKey] = newWord
-                        table.insert(topSuffixWords, newWord)
-                        usedThisRound[newWord] = true
+                    if w == cached and not UsedWords[cached] and not Blacklist[cached] then
+                        valid = true
+                        break
                     end
                 end
+            end
+            
+            if valid then
+                table.insert(suffixWords, cached)
+                usedInSuffix[cached] = true
             else
-                -- Need a new word for this suffix
-                local newWord = getBestWordForSuffix(primaryMatches, suffix, usedThisRound)
+                local newWord = findShortestWithSuffix(primaryMatches, suffix, usedInSuffix)
                 if newWord then
-                    UsedSuffixWords[suffixKey] = newWord
-                    table.insert(topSuffixWords, newWord)
-                    usedThisRound[newWord] = true
+                    UsedSuffixWords[suffix] = newWord
+                    table.insert(suffixWords, newWord)
+                    usedInSuffix[newWord] = true
                 end
             end
         end
         
-        -- If any suffixes still don't have words, try FALLBACK
+        -- STEP 2: For missing suffixes, try FALLBACK
         for i, suffix in ipairs(suffixList) do
-            if i > #topSuffixWords or topSuffixWords[i] == nil then
-                local newWord = getBestWordForSuffix(fallbackMatches, suffix, usedThisRound)
+            if i > #suffixWords or suffixWords[i] == nil then
+                local newWord = findShortestWithSuffix(fallbackMatches, suffix, usedInSuffix)
                 if newWord then
-                    local suffixKey = suffix
-                    UsedSuffixWords[suffixKey] = newWord
-                    if i <= #topSuffixWords then
-                        topSuffixWords[i] = newWord
+                    UsedSuffixWords[suffix] = newWord
+                    if i <= #suffixWords then
+                        suffixWords[i] = newWord
                     else
-                        table.insert(topSuffixWords, newWord)
+                        table.insert(suffixWords, newWord)
                     end
-                    usedThisRound[newWord] = true
+                    usedInSuffix[newWord] = true
                 end
             end
         end
         
         -- Remove nil entries
-        local cleanedSuffixWords = {}
-        for _, word in ipairs(topSuffixWords) do
-            if word then
-                table.insert(cleanedSuffixWords, word)
-            end
-        end
-        topSuffixWords = cleanedSuffixWords
+        local cleanSuffixWords = {}
+        for _, w in ipairs(suffixWords) do if w then table.insert(cleanSuffixWords, w) end end
         
-        -- Remove suffix words from primary and fallback matches so they don't appear twice
-        local function removeWordsFromList(list, wordsToRemove)
-            local newList = {}
-            for _, word in ipairs(list) do
-                local shouldRemove = false
-                for _, removeWord in ipairs(wordsToRemove) do
-                    if word == removeWord then
-                        shouldRemove = true
-                        break
-                    end
-                end
-                if not shouldRemove then
-                    table.insert(newList, word)
-                end
-            end
-            return newList
+        -- Remove suffix words from main lists
+        local function removeWords(list, toRemove)
+            local removeSet = {}
+            for _, w in ipairs(toRemove) do removeSet[w] = true end
+            local new = {}
+            for _, w in ipairs(list) do if not removeSet[w] then table.insert(new, w) end end
+            return new
         end
         
-        local primaryRemaining = removeWordsFromList(primaryMatches, topSuffixWords)
-        local fallbackRemaining = removeWordsFromList(fallbackMatches, topSuffixWords)
+        local primaryRemaining = removeWords(primaryMatches, cleanSuffixWords)
+        local fallbackRemaining = removeWords(fallbackMatches, cleanSuffixWords)
         
-        -- Sort PRIMARY remaining according to mode
+        -- Sort PRIMARY remaining by mode
         local sortedPrimary = {}
         if sortMode == "Strategic" then
             sortedPrimary = StrategicSort(primaryRemaining, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            table.sort(primaryRemaining, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return a < b
-            end)
+            table.sort(primaryRemaining, function(a,b) return #a < #b end)
             sortedPrimary = primaryRemaining
         elseif sortMode == "Random" then
             for i = #primaryRemaining, 2, -1 do
@@ -2249,15 +2126,12 @@ UpdateList = function(detectedText, requiredLetter)
             sortedPrimary = SmartSort(primaryRemaining, searchPrefix, UsedWords)
         end
         
-        -- Sort FALLBACK remaining according to mode
+        -- Sort FALLBACK remaining by mode
         local sortedFallback = {}
         if sortMode == "Strategic" then
             sortedFallback = StrategicSort(fallbackRemaining, searchPrefix, UsedWords)
         elseif sortMode == "Shortest" then
-            table.sort(fallbackRemaining, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return a < b
-            end)
+            table.sort(fallbackRemaining, function(a,b) return #a < #b end)
             sortedFallback = fallbackRemaining
         elseif sortMode == "Random" then
             for i = #fallbackRemaining, 2, -1 do
@@ -2269,50 +2143,34 @@ UpdateList = function(detectedText, requiredLetter)
             sortedFallback = SmartSort(fallbackRemaining, searchPrefix, UsedWords)
         end
         
-        -- Combine: Suffix words (1 per suffix) -> PRIMARY sorted -> FALLBACK sorted
+        -- Build final result: Suffix words -> PRIMARY -> FALLBACK
         local result = {}
+        for _, w in ipairs(cleanSuffixWords) do if #result < 40 then table.insert(result, w) end end
+        for _, w in ipairs(sortedPrimary) do if #result < 40 then table.insert(result, w) end end
+        for _, w in ipairs(sortedFallback) do if #result < 40 then table.insert(result, w) end end
         
-        -- Add suffix words (1 per suffix in priority order)
-        for _, word in ipairs(topSuffixWords) do
-            if #result >= 40 then break end
-            table.insert(result, word)
-        end
-        
-        -- Add PRIMARY words
-        for _, word in ipairs(sortedPrimary) do
-            if #result >= 40 then break end
-            table.insert(result, word)
-        end
-        
-        -- Add FALLBACK words
-        for _, word in ipairs(sortedFallback) do
-            if #result >= 40 then break end
-            table.insert(result, word)
-        end
-        
-        matches = result
+        prefixMatches = result
     end
 
+    -- Display the results
     local displayList = {}
-    local maxDisplay = 15
-    for i = 1, math.min(maxDisplay, #matches) do
-        table.insert(displayList, matches[i])
+    for i = 1, math.min(15, #prefixMatches) do
+        table.insert(displayList, prefixMatches[i])
     end
 
-    if #matches > 0 and not isBacktracked then
-        currentBestMatch = matches[1]
+    if #prefixMatches > 0 and not isBacktracked then
+        currentBestMatch = prefixMatches[1]
     else
         currentBestMatch = nil
     end
 
     if isBacktracked then
-        local validPart = searchPrefix
-        local invalidPart = (detectedText or ""):sub(#searchPrefix + 1)
         local accentRGB = ColorToRGB(THEME.Accent)
-        StatusText.Text = "No match: <font color=\"rgb(" .. accentRGB .. ")\">" .. validPart .. "</font><font color=\"rgb(255,80,80)\">" .. invalidPart .. "</font>"
+        StatusText.Text = "No match: <font color=\"rgb(" .. accentRGB .. ")\">" .. searchPrefix .. "</font>"
         StatusText.TextColor3 = THEME.SubText
     end
 
+    -- Update buttons
     for i = 1, math.max(#displayList, #ButtonCache) do
         local w = displayList[i]
         local btn = ButtonCache[i]
