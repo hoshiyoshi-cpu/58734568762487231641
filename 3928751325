@@ -1896,27 +1896,32 @@ UpdateList = function(detectedText, requiredLetter)
             suffixPriority[s] = idx
         end
         
+        -- Track used words per suffix to replace them when used
+        if not PerSuffixUsed then PerSuffixUsed = {} end
+        
         -- Calculate suffix priority for each word
         local function getWordPriority(w)
             local wl = w:lower()
             local bestPriority = 999
+            local bestSuffix = nil
             for _, s in ipairs(suffixList) do
                 if #wl >= #s and wl:sub(-#s) == s then
                     local p = suffixPriority[s] or 999
                     if p < bestPriority then
                         bestPriority = p
+                        bestSuffix = s
                     end
                 end
             end
-            return bestPriority
+            return bestPriority, bestSuffix
         end
         
-        -- Apply sort mode with suffix priority integrated
+        -- Apply sort mode with suffix priority (max 3 per suffix)
         if sortMode == "Strategic" then
-            -- Strategic sort with suffix priority
             local giveWordsLookup = GiveWordsLookup
             local SHORT_THRESHOLD = 5
             local MAX_WORDS = 40
+            local MAX_PER_SUFFIX = 3  -- Max 3 results per suffix priority
             
             local giveWords = {}
             local suffixGrouped = {}  -- priority -> {words}
@@ -1925,15 +1930,35 @@ UpdateList = function(detectedText, requiredLetter)
             
             for _, word in ipairs(matches) do
                 local wl = word:lower()
-                local priority = getWordPriority(word)
+                local priority, suffix = getWordPriority(word)
                 
                 if giveWordsLookup[wl] then
                     table.insert(giveWords, word)
                 elseif priority < 999 then
-                    if not suffixGrouped[priority] then
-                        suffixGrouped[priority] = {}
+                    -- Check if we already have MAX_PER_SUFFIX for this suffix
+                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
+                    local currentCount = 0
+                    if suffixGrouped[priority] then
+                        for _, existingWord in ipairs(suffixGrouped[priority]) do
+                            local _, existingSuffix = getWordPriority(existingWord)
+                            if existingSuffix == suffix then
+                                currentCount = currentCount + 1
+                            end
+                        end
                     end
-                    table.insert(suffixGrouped[priority], word)
+                    if currentCount < MAX_PER_SUFFIX then
+                        if not suffixGrouped[priority] then
+                            suffixGrouped[priority] = {}
+                        end
+                        table.insert(suffixGrouped[priority], word)
+                    else
+                        -- Too many for this suffix, treat as regular word
+                        if #wl <= SHORT_THRESHOLD then
+                            table.insert(shortWords, word)
+                        else
+                            table.insert(otherWords, word)
+                        end
+                    end
                 elseif #wl <= SHORT_THRESHOLD then
                     table.insert(shortWords, word)
                 else
@@ -1963,7 +1988,7 @@ UpdateList = function(detectedText, requiredLetter)
                 table.insert(result, word)
             end
             
-            -- Suffix groups in priority order
+            -- Suffix groups in priority order (max 3 per suffix already enforced)
             local sortedPriorities = {}
             for p, _ in pairs(suffixGrouped) do
                 table.insert(sortedPriorities, p)
@@ -1995,22 +2020,37 @@ UpdateList = function(detectedText, requiredLetter)
             matches = result
             
         elseif sortMode == "Shortest" then
-            -- Shortest mode with suffix priority
+            -- Shortest mode with suffix priority (max 3 per suffix)
+            local MAX_PER_SUFFIX = 3
             local giveWords = {}
             local suffixGrouped = {}
             local otherWords = {}
             
             for _, word in ipairs(matches) do
                 local wl = word:lower()
-                local priority = getWordPriority(word)
+                local priority, suffix = getWordPriority(word)
                 
                 if GiveWordsLookup[wl] then
                     table.insert(giveWords, word)
                 elseif priority < 999 then
-                    if not suffixGrouped[priority] then
-                        suffixGrouped[priority] = {}
+                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
+                    local currentCount = 0
+                    if suffixGrouped[priority] then
+                        for _, existingWord in ipairs(suffixGrouped[priority]) do
+                            local _, existingSuffix = getWordPriority(existingWord)
+                            if existingSuffix == suffix then
+                                currentCount = currentCount + 1
+                            end
+                        end
                     end
-                    table.insert(suffixGrouped[priority], word)
+                    if currentCount < MAX_PER_SUFFIX then
+                        if not suffixGrouped[priority] then
+                            suffixGrouped[priority] = {}
+                        end
+                        table.insert(suffixGrouped[priority], word)
+                    else
+                        table.insert(otherWords, word)
+                    end
                 else
                     table.insert(otherWords, word)
                 end
@@ -2054,17 +2094,32 @@ UpdateList = function(detectedText, requiredLetter)
             matches = result
             
         elseif sortMode == "Random" then
-            -- Random mode with suffix priority
+            -- Random mode with suffix priority (max 3 per suffix)
+            local MAX_PER_SUFFIX = 3
             local suffixGrouped = {}
             local noSuffix = {}
             
             for _, word in ipairs(matches) do
-                local priority = getWordPriority(word)
+                local priority, suffix = getWordPriority(word)
                 if priority < 999 then
-                    if not suffixGrouped[priority] then
-                        suffixGrouped[priority] = {}
+                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
+                    local currentCount = 0
+                    if suffixGrouped[priority] then
+                        for _, existingWord in ipairs(suffixGrouped[priority]) do
+                            local _, existingSuffix = getWordPriority(existingWord)
+                            if existingSuffix == suffix then
+                                currentCount = currentCount + 1
+                            end
+                        end
                     end
-                    table.insert(suffixGrouped[priority], word)
+                    if currentCount < MAX_PER_SUFFIX then
+                        if not suffixGrouped[priority] then
+                            suffixGrouped[priority] = {}
+                        end
+                        table.insert(suffixGrouped[priority], word)
+                    else
+                        table.insert(noSuffix, word)
+                    end
                 else
                     table.insert(noSuffix, word)
                 end
@@ -2106,19 +2161,36 @@ UpdateList = function(detectedText, requiredLetter)
             matches = result
             
         elseif sortMode == "Smart" then
-            -- Smart mode with suffix priority
+            -- Smart mode with suffix priority (max 3 per suffix)
+            local MAX_PER_SUFFIX = 3
             local suffixGrouped = {}
             local shortWords = {}
             local longWords = {}
             local SHORT_THRESHOLD = 6
             
             for _, word in ipairs(matches) do
-                local priority = getWordPriority(word)
+                local priority, suffix = getWordPriority(word)
                 if priority < 999 then
-                    if not suffixGrouped[priority] then
-                        suffixGrouped[priority] = {}
+                    local suffixKey = tostring(priority) .. "_" .. (suffix or "")
+                    local currentCount = 0
+                    if suffixGrouped[priority] then
+                        for _, existingWord in ipairs(suffixGrouped[priority]) do
+                            local _, existingSuffix = getWordPriority(existingWord)
+                            if existingSuffix == suffix then
+                                currentCount = currentCount + 1
+                            end
+                        end
                     end
-                    table.insert(suffixGrouped[priority], word)
+                    if currentCount < MAX_PER_SUFFIX then
+                        if not suffixGrouped[priority] then
+                            suffixGrouped[priority] = {}
+                        end
+                        table.insert(suffixGrouped[priority], word)
+                    elseif #word <= SHORT_THRESHOLD then
+                        table.insert(shortWords, word)
+                    else
+                        table.insert(longWords, word)
+                    end
                 elseif #word <= SHORT_THRESHOLD then
                     table.insert(shortWords, word)
                 else
