@@ -1721,7 +1721,7 @@ do
             UpdateList(lastDetected, lastRequiredLetter)
         end
     end
-    
+
     WBSearchBtn.MouseButton1Click:Connect(SearchWords)
     WBEndBox.FocusLost:Connect(function(enter) if enter then SearchWords() end end)
     WBLengthBox.FocusLost:Connect(function(enter) if enter then SearchWords() end end)
@@ -1889,202 +1889,269 @@ UpdateList = function(detectedText, requiredLetter)
     end
 
     if #matches > 0 then
-        local filtered = {}
-        local noSuffixMatches = {}
-        
-        -- Get suffix priorities from Config
+        -- Get suffix priorities
         local suffixList = Config.SuffixModes or {}
         local suffixPriority = {}
         for idx, s in ipairs(suffixList) do
             suffixPriority[s] = idx
         end
         
-        -- Create priority groups based on suffix matches
-        local priorityGroups = {}  -- priority -> {words}
-        
-        for _, w in ipairs(matches) do
+        -- Calculate suffix priority for each word
+        local function getWordPriority(w)
             local wl = w:lower()
-            local matchedSuffix = nil
-            local matchedPriority = 999
-            
-            -- Check which suffix this word matches
-            if #suffixList > 0 then
-                for _, s in ipairs(suffixList) do
-                    if #wl >= #s and wl:sub(-#s) == s then
-                        local p = suffixPriority[s] or 999
-                        if p < matchedPriority then
-                            matchedPriority = p
-                            matchedSuffix = s
-                        end
+            local bestPriority = 999
+            for _, s in ipairs(suffixList) do
+                if #wl >= #s and wl:sub(-#s) == s then
+                    local p = suffixPriority[s] or 999
+                    if p < bestPriority then
+                        bestPriority = p
                     end
                 end
             end
-            
-            if matchedSuffix and #suffixList > 0 then
-                -- Word matches a suffix - add to priority group
-                if not priorityGroups[matchedPriority] then
-                    priorityGroups[matchedPriority] = {}
-                end
-                table.insert(priorityGroups[matchedPriority], w)
-            else
-                -- No suffix match
-                if lengthMode == 0 or #w == lengthMode then
-                    table.insert(noSuffixMatches, w)
-                end
-            end
+            return bestPriority
         end
         
-        -- Build filtered list in priority order
-        local sortedPriorities = {}
-        for priority, _ in pairs(priorityGroups) do
-            table.insert(sortedPriorities, priority)
-        end
-        table.sort(sortedPriorities)
-        
-        -- Add priority groups in order (sorted by length within each group)
-        for _, priority in ipairs(sortedPriorities) do
-            local group = priorityGroups[priority]
-            -- Sort by length (shortest first) within each suffix group
-            table.sort(group, function(a, b) return #a < #b end)
-            for _, word in ipairs(group) do
-                table.insert(filtered, word)
-            end
-        end
-        
-        -- Add no-suffix matches at the end
-        for _, word in ipairs(noSuffixMatches) do
-            table.insert(filtered, word)
-        end
-        
-        -- Now apply the selected sort mode to the filtered list
+        -- Apply sort mode with suffix priority integrated
         if sortMode == "Strategic" then
-            -- Pass filtered to StrategicSort (which handles give words, short words, etc.)
-            filtered = StrategicSort(filtered, searchPrefix, UsedWords)
-        elseif sortMode == "Shortest" then
-            -- Split words into give words and regular words
-            local giveWords = {}
-            local regularWords = {}
+            -- Strategic sort with suffix priority
+            local giveWordsLookup = GiveWordsLookup
+            local SHORT_THRESHOLD = 5
+            local MAX_WORDS = 40
             
-            for _, word in ipairs(filtered) do
-                if GiveWordsLookup[word:lower()] then
+            local giveWords = {}
+            local suffixGrouped = {}  -- priority -> {words}
+            local shortWords = {}
+            local otherWords = {}
+            
+            for _, word in ipairs(matches) do
+                local wl = word:lower()
+                local priority = getWordPriority(word)
+                
+                if giveWordsLookup[wl] then
                     table.insert(giveWords, word)
+                elseif priority < 999 then
+                    if not suffixGrouped[priority] then
+                        suffixGrouped[priority] = {}
+                    end
+                    table.insert(suffixGrouped[priority], word)
+                elseif #wl <= SHORT_THRESHOLD then
+                    table.insert(shortWords, word)
                 else
-                    table.insert(regularWords, word)
+                    table.insert(otherWords, word)
                 end
             end
             
-            -- Sort give words by length (shortest first)
-            table.sort(giveWords, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return a < b
-            end)
+            local function sortByLength(a, b) return #a < #b end
+            table.sort(giveWords, sortByLength)
+            table.sort(shortWords, sortByLength)
+            table.sort(otherWords, sortByLength)
             
-            -- Sort regular words by length (shortest first)
-            table.sort(regularWords, function(a, b)
-                if #a ~= #b then return #a < #b end
-                return a < b
-            end)
+            -- Shuffle within groups for variety
+            local function shuffle(t)
+                for i = #t, 2, -1 do
+                    local j = math.random(i)
+                    t[i], t[j] = t[j], t[i]
+                end
+                return t
+            end
             
-            -- Combine: give words first, then regular words
-            local sorted = {}
+            local result = {}
+            
+            -- Give words first
+            for _, word in ipairs(shuffle(giveWords)) do
+                if #result >= MAX_WORDS then break end
+                table.insert(result, word)
+            end
+            
+            -- Suffix groups in priority order
+            local sortedPriorities = {}
+            for p, _ in pairs(suffixGrouped) do
+                table.insert(sortedPriorities, p)
+            end
+            table.sort(sortedPriorities)
+            
+            for _, p in ipairs(sortedPriorities) do
+                local group = suffixGrouped[p]
+                table.sort(group, sortByLength)
+                for _, word in ipairs(shuffle(group)) do
+                    if #result >= MAX_WORDS then break end
+                    table.insert(result, word)
+                end
+                if #result >= MAX_WORDS then break end
+            end
+            
+            -- Short words
+            for _, word in ipairs(shuffle(shortWords)) do
+                if #result >= MAX_WORDS then break end
+                table.insert(result, word)
+            end
+            
+            -- Other words
+            for _, word in ipairs(shuffle(otherWords)) do
+                if #result >= MAX_WORDS then break end
+                table.insert(result, word)
+            end
+            
+            matches = result
+            
+        elseif sortMode == "Shortest" then
+            -- Shortest mode with suffix priority
+            local giveWords = {}
+            local suffixGrouped = {}
+            local otherWords = {}
+            
+            for _, word in ipairs(matches) do
+                local wl = word:lower()
+                local priority = getWordPriority(word)
+                
+                if GiveWordsLookup[wl] then
+                    table.insert(giveWords, word)
+                elseif priority < 999 then
+                    if not suffixGrouped[priority] then
+                        suffixGrouped[priority] = {}
+                    end
+                    table.insert(suffixGrouped[priority], word)
+                else
+                    table.insert(otherWords, word)
+                end
+            end
+            
+            local function sortByLength(a, b) return #a < #b end
+            table.sort(giveWords, sortByLength)
+            table.sort(otherWords, sortByLength)
+            
+            local result = {}
+            
+            -- Give words first
             for _, word in ipairs(giveWords) do
-                table.insert(sorted, word)
-            end
-            for _, word in ipairs(regularWords) do
-                table.insert(sorted, word)
+                if #result >= 40 then break end
+                table.insert(result, word)
             end
             
-            -- Limit to 40 results
-            local limited = {}
-            for i = 1, math.min(40, #sorted) do
-                table.insert(limited, sorted[i])
+            -- Suffix groups in priority order, each sorted by length
+            local sortedPriorities = {}
+            for p, _ in pairs(suffixGrouped) do
+                table.insert(sortedPriorities, p)
             end
-            filtered = limited
+            table.sort(sortedPriorities)
+            
+            for _, p in ipairs(sortedPriorities) do
+                local group = suffixGrouped[p]
+                table.sort(group, sortByLength)
+                for _, word in ipairs(group) do
+                    if #result >= 40 then break end
+                    table.insert(result, word)
+                end
+                if #result >= 40 then break end
+            end
+            
+            -- Other words
+            for _, word in ipairs(otherWords) do
+                if #result >= 40 then break end
+                table.insert(result, word)
+            end
+            
+            matches = result
             
         elseif sortMode == "Random" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
+            -- Random mode with suffix priority
+            local suffixGrouped = {}
+            local noSuffix = {}
+            
+            for _, word in ipairs(matches) do
+                local priority = getWordPriority(word)
+                if priority < 999 then
+                    if not suffixGrouped[priority] then
+                        suffixGrouped[priority] = {}
                     end
+                    table.insert(suffixGrouped[priority], word)
+                else
+                    table.insert(noSuffix, word)
                 end
-            else
-                customFiltered = filtered
             end
             
-            for i = #customFiltered, 2, -1 do
+            local result = {}
+            
+            -- Suffix groups in priority order
+            local sortedPriorities = {}
+            for p, _ in pairs(suffixGrouped) do
+                table.insert(sortedPriorities, p)
+            end
+            table.sort(sortedPriorities)
+            
+            for _, p in ipairs(sortedPriorities) do
+                local group = suffixGrouped[p]
+                -- Shuffle within group
+                for i = #group, 2, -1 do
+                    local j = math.random(i)
+                    group[i], group[j] = group[j], group[i]
+                end
+                for _, word in ipairs(group) do
+                    if #result >= 40 then break end
+                    table.insert(result, word)
+                end
+                if #result >= 40 then break end
+            end
+            
+            -- No suffix words shuffled
+            for i = #noSuffix, 2, -1 do
                 local j = math.random(i)
-                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
+                noSuffix[i], noSuffix[j] = noSuffix[j], noSuffix[i]
+            end
+            for _, word in ipairs(noSuffix) do
+                if #result >= 40 then break end
+                table.insert(result, word)
             end
             
-            local lengthGroups = {}
-            local orderTracker = {}
-            
-            for _, word in ipairs(customFiltered) do
-                local len = #word
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                    table.insert(orderTracker, len)
-                end
-                table.insert(lengthGroups[len], word)
-            end
-            
-            table.sort(orderTracker)
-            
-            local sorted = {}
-            for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(sorted, word)
-                end
-            end
-            
-            local limited = {}
-            for i = 1, math.min(40, #sorted) do
-                table.insert(limited, sorted[i])
-            end
-            filtered = limited
+            matches = result
             
         elseif sortMode == "Smart" then
-            local customFiltered = {}
-            if Config.CustomWords and #Config.CustomWords > 0 then
-                for _, word in ipairs(filtered) do
-                    for _, customPrefix in ipairs(Config.CustomWords) do
-                        if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                            table.insert(customFiltered, word)
-                            break
-                        end
-                    end
-                end
-            else
-                customFiltered = filtered
-            end
-            
-            for i = #customFiltered, 2, -1 do
-                local j = math.random(i)
-                customFiltered[i], customFiltered[j] = customFiltered[j], customFiltered[i]
-            end
-            
-            local SHORT_THRESHOLD = 6
+            -- Smart mode with suffix priority
+            local suffixGrouped = {}
             local shortWords = {}
             local longWords = {}
+            local SHORT_THRESHOLD = 6
             
-            for _, word in ipairs(customFiltered) do
-                if #word <= SHORT_THRESHOLD then
+            for _, word in ipairs(matches) do
+                local priority = getWordPriority(word)
+                if priority < 999 then
+                    if not suffixGrouped[priority] then
+                        suffixGrouped[priority] = {}
+                    end
+                    table.insert(suffixGrouped[priority], word)
+                elseif #word <= SHORT_THRESHOLD then
                     table.insert(shortWords, word)
                 else
                     table.insert(longWords, word)
                 end
             end
             
-            local smartResult = {}
+            local result = {}
             
+            -- Suffix groups in priority order
+            local sortedPriorities = {}
+            for p, _ in pairs(suffixGrouped) do
+                table.insert(sortedPriorities, p)
+            end
+            table.sort(sortedPriorities)
+            
+            for _, p in ipairs(sortedPriorities) do
+                local group = suffixGrouped[p]
+                -- Shuffle within group
+                for i = #group, 2, -1 do
+                    local j = math.random(i)
+                    group[i], group[j] = group[j], group[i]
+                end
+                for _, word in ipairs(group) do
+                    if #result >= 40 then break end
+                    table.insert(result, word)
+                end
+                if #result >= 40 then break end
+            end
+            
+            -- Short words (shuffled by length groups)
             local lengthGroups = {}
             local orderTracker = {}
-            
             for _, word in ipairs(shortWords) do
                 local len = #word
                 if not lengthGroups[len] then
@@ -2093,37 +2160,32 @@ UpdateList = function(detectedText, requiredLetter)
                 end
                 table.insert(lengthGroups[len], word)
             end
-            
             table.sort(orderTracker)
-            
             for _, len in ipairs(orderTracker) do
-                for _, word in ipairs(lengthGroups[len]) do
-                    table.insert(smartResult, word)
-                end
-            end
-            
-            if #longWords > 0 then
-                for i = #longWords, 2, -1 do
+                local group = lengthGroups[len]
+                for i = #group, 2, -1 do
                     local j = math.random(i)
-                    longWords[i], longWords[j] = longWords[j], longWords[i]
+                    group[i], group[j] = group[j], group[i]
                 end
-                for i = 1, math.min(30, #longWords) do
-                    table.insert(smartResult, longWords[i])
+                for _, word in ipairs(group) do
+                    if #result >= 40 then break end
+                    table.insert(result, word)
                 end
+                if #result >= 40 then break end
             end
             
-            if #smartResult > 40 then
-                local final = {}
-                for i = 1, 40 do
-                    table.insert(final, smartResult[i])
-                end
-                filtered = final
-            else
-                filtered = smartResult
+            -- Long words shuffled
+            for i = #longWords, 2, -1 do
+                local j = math.random(i)
+                longWords[i], longWords[j] = longWords[j], longWords[i]
             end
+            for _, word in ipairs(longWords) do
+                if #result >= 40 then break end
+                table.insert(result, word)
+            end
+            
+            matches = result
         end
-        
-        matches = filtered
     end
 
     local displayList = {}
