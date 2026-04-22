@@ -1956,21 +1956,41 @@ UpdateList = function(detectedText, requiredLetter)
         bucket = AllWords
     end
 
-    -- FIRST: Find ALL words that match the prefix from the bucket
+    -- OPTIMIZED: Collect matches with early stopping for suffix words
     local prefixMatches = {}
     local prefixLen = #searchPrefix
     
+    -- FIRST PASS: Only collect PRIMARY words (since they're priority)
+    -- We'll only add fallback if needed
+    local primarySet = {}
+    for _, w in ipairs(PrimaryWords) do primarySet[w] = true end
+    
+    -- Collect PRIMARY matches only first
     for _, w in ipairs(bucket) do
         if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
             if lengthMode == 0 or #w == lengthMode then
-                if not Blacklist[w] and not UsedWords[w] then
+                if not Blacklist[w] and not UsedWords[w] and primarySet[w] then
                     table.insert(prefixMatches, w)
                 end
             end
         end
     end
     
-    -- If no exact matches, try partial matches
+    -- If not enough PRIMARY matches, add FALLBACK
+    if #prefixMatches < 200 then
+        for _, w in ipairs(bucket) do
+            if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
+                if lengthMode == 0 or #w == lengthMode then
+                    if not Blacklist[w] and not UsedWords[w] and not primarySet[w] then
+                        table.insert(prefixMatches, w)
+                        if #prefixMatches >= 200 then break end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Handle partial matches if no exacts
     if #prefixMatches == 0 then
         local maxPartialLen = 0
         for _, w in ipairs(bucket) do
@@ -2000,6 +2020,7 @@ UpdateList = function(detectedText, requiredLetter)
             if not Blacklist[w] and not UsedWords[w] then
                 if w:sub(1, #requiredLetter) == requiredLetter then
                     table.insert(prefixMatches, w)
+                    if #prefixMatches >= 50 then break end
                 end
             end
         end
@@ -2011,9 +2032,6 @@ UpdateList = function(detectedText, requiredLetter)
 
     if #prefixMatches > 0 then
         -- Split into PRIMARY and FALLBACK
-        local primarySet = {}
-        for _, w in ipairs(PrimaryWords) do primarySet[w] = true end
-        
         local primaryMatches = {}
         local fallbackMatches = {}
         for _, w in ipairs(prefixMatches) do
@@ -2030,24 +2048,22 @@ UpdateList = function(detectedText, requiredLetter)
         -- TRACK used suffix words
         if not UsedSuffixWords then UsedSuffixWords = {} end
         
-        -- Helper: Find shortest word with given suffix from a list
-        local function findShortestWithSuffix(wordList, suffix, excludeSet)
-            local best = nil
-            local bestLen = 999
+        -- OPTIMIZED: Find shortest word with suffix - STOPS EARLY
+        -- Since PRIMARY words are already sorted by length in the bucket (from loading),
+        -- we can just find the first match and it will be the shortest!
+        local function findFirstWithSuffix(wordList, suffix, excludeSet)
+            -- PRIMARY words are already in order of length (shortest first)
             for _, w in ipairs(wordList) do
                 if not excludeSet[w] and not UsedWords[w] and not Blacklist[w] then
                     if #w >= #suffix and w:sub(-#suffix) == suffix then
-                        if #w < bestLen then
-                            bestLen = #w
-                            best = w
-                        end
+                        return w  -- FIRST match = shortest because list is sorted by length
                     end
                 end
             end
-            return best
+            return nil
         end
         
-        -- STEP 1: Get suffix words (1 per suffix) from PRIMARY first
+        -- STEP 1: Get suffix words from PRIMARY first (1 per suffix)
         local suffixWords = {}
         local usedInSuffix = {}
         
@@ -2068,7 +2084,8 @@ UpdateList = function(detectedText, requiredLetter)
                 table.insert(suffixWords, cached)
                 usedInSuffix[cached] = true
             else
-                local newWord = findShortestWithSuffix(primaryMatches, suffix, usedInSuffix)
+                -- Find first match (shortest) - STOPS AT FIRST FOUND
+                local newWord = findFirstWithSuffix(primaryMatches, suffix, usedInSuffix)
                 if newWord then
                     UsedSuffixWords[suffix] = newWord
                     table.insert(suffixWords, newWord)
@@ -2080,7 +2097,7 @@ UpdateList = function(detectedText, requiredLetter)
         -- STEP 2: For missing suffixes, try FALLBACK
         for i, suffix in ipairs(suffixList) do
             if i > #suffixWords or suffixWords[i] == nil then
-                local newWord = findShortestWithSuffix(fallbackMatches, suffix, usedInSuffix)
+                local newWord = findFirstWithSuffix(fallbackMatches, suffix, usedInSuffix)
                 if newWord then
                     UsedSuffixWords[suffix] = newWord
                     if i <= #suffixWords then
@@ -2097,17 +2114,15 @@ UpdateList = function(detectedText, requiredLetter)
         local cleanSuffixWords = {}
         for _, w in ipairs(suffixWords) do if w then table.insert(cleanSuffixWords, w) end end
         
-        -- Remove suffix words from main lists
-        local function removeWords(list, toRemove)
-            local removeSet = {}
-            for _, w in ipairs(toRemove) do removeSet[w] = true end
-            local new = {}
-            for _, w in ipairs(list) do if not removeSet[w] then table.insert(new, w) end end
-            return new
-        end
+        -- Remove suffix words from main lists (using a set for O(1) lookup)
+        local removeSet = {}
+        for _, w in ipairs(cleanSuffixWords) do removeSet[w] = true end
         
-        local primaryRemaining = removeWords(primaryMatches, cleanSuffixWords)
-        local fallbackRemaining = removeWords(fallbackMatches, cleanSuffixWords)
+        local primaryRemaining = {}
+        for _, w in ipairs(primaryMatches) do if not removeSet[w] then table.insert(primaryRemaining, w) end end
+        
+        local fallbackRemaining = {}
+        for _, w in ipairs(fallbackMatches) do if not removeSet[w] then table.insert(fallbackRemaining, w) end end
         
         -- Sort PRIMARY remaining by mode
         local sortedPrimary = {}
@@ -2143,7 +2158,7 @@ UpdateList = function(detectedText, requiredLetter)
             sortedFallback = SmartSort(fallbackRemaining, searchPrefix, UsedWords)
         end
         
-        -- Build final result: Suffix words -> PRIMARY -> FALLBACK
+        -- Build final result (limit to 40 total)
         local result = {}
         for _, w in ipairs(cleanSuffixWords) do if #result < 40 then table.insert(result, w) end end
         for _, w in ipairs(sortedPrimary) do if #result < 40 then table.insert(result, w) end end
