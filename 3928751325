@@ -161,6 +161,9 @@ LoadingStatus.TextColor3 = THEME.Text
 LoadingStatus.Font = Enum.Font.Gotham
 LoadingStatus.TextSize = 14
 
+local lastCacheCleanup = tick()
+
+
 local function UpdateStatus(text, color)
     LoadingStatus.Text = text
     if color then LoadingStatus.TextColor3 = color end
@@ -1960,29 +1963,57 @@ UpdateList = function(detectedText, requiredLetter)
     local primarySet = {}
     for _, w in ipairs(PrimaryWords) do primarySet[w] = true end
     
+    -- FIX 1: Periodic cleanup of suffix cache (every 5 minutes)
+    if not lastCacheCleanup then lastCacheCleanup = tick() end
+    if tick() - lastCacheCleanup > 300 then
+        lastCacheCleanup = tick()
+        UsedSuffixWords = {}
+        ShowToast("Cleared suffix cache", "warning")
+    end
+    
     -- Track used suffix words
     if not UsedSuffixWords then UsedSuffixWords = {} end
     
-    -- FIRST PASS: ONLY search PRIMARY words for suffix matches
+    -- FIX 2: OPTIMIZED - FIRST PASS - ONLY search PRIMARY words for suffix matches
     local suffixPrimaryFound = {}
     local usedInSuffix = {}
-    
     local prefixLen = #searchPrefix
     
-    for _, suffix in ipairs(suffixList) do
-        -- Search PRIMARY words for this suffix
-        for _, w in ipairs(PrimaryWords) do
-            if not suffixPrimaryFound[suffix] then
-                if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
-                    if lengthMode == 0 or #w == lengthMode then
-                        if not Blacklist[w] and not UsedWords[w] then
-                            if #w >= #suffix and w:sub(-#suffix) == suffix then
-                                suffixPrimaryFound[suffix] = w
-                                usedInSuffix[w] = true
-                                break
-                            end
+    -- Pre-filter PRIMARY words that start with our prefix (build once per letter)
+    local prefixFilteredPrimary = {}
+    if prefixLen > 0 then
+        local pBucket = PrimaryBuckets[searchPrefix:sub(1,1)]
+        if pBucket then
+            for _, w in ipairs(pBucket) do
+                if prefixLen == 1 or w:sub(1, prefixLen) == searchPrefix then
+                    if not Blacklist[w] and not UsedWords[w] then
+                        if lengthMode == 0 or #w == lengthMode then
+                            table.insert(prefixFilteredPrimary, w)
                         end
                     end
+                end
+            end
+        end
+    else
+        -- Use full PrimaryWords but limit iteration
+        for _, w in ipairs(PrimaryWords) do
+            if not Blacklist[w] and not UsedWords[w] then
+                if lengthMode == 0 or #w == lengthMode then
+                    table.insert(prefixFilteredPrimary, w)
+                end
+            end
+            if #prefixFilteredPrimary > 500 then break end -- Cap for performance
+        end
+    end
+    
+    -- Now find suffix matches from the filtered list
+    for _, suffix in ipairs(suffixList) do
+        if not suffixPrimaryFound[suffix] then
+            for _, w in ipairs(prefixFilteredPrimary) do
+                if #w >= #suffix and w:sub(-#suffix) == suffix then
+                    suffixPrimaryFound[suffix] = w
+                    usedInSuffix[w] = true
+                    break
                 end
             end
         end
@@ -1997,41 +2028,56 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- Build ordered suffix words from PRIMARY found
+    -- Build ordered suffix words
     local orderedSuffixWords = {}
     if allSuffixesFound then
         for _, suffix in ipairs(suffixList) do
             if suffixPrimaryFound[suffix] then
                 table.insert(orderedSuffixWords, suffixPrimaryFound[suffix])
-                -- Cache the found word
                 UsedSuffixWords[suffix] = suffixPrimaryFound[suffix]
             end
         end
     else
-        -- NOT all suffixes found in PRIMARY, now try FALLBACK for missing ones
+        -- FALLBACK: Pre-filter FallbackWords for missing suffixes
+        local prefixFilteredFallback = {}
+        if prefixLen > 0 then
+            local fBucket = Buckets[searchPrefix:sub(1,1)]
+            if fBucket then
+                for _, w in ipairs(fBucket) do
+                    if prefixLen == 1 or w:sub(1, prefixLen) == searchPrefix then
+                        if not Blacklist[w] and not UsedWords[w] and not primarySet[w] then
+                            if lengthMode == 0 or #w == lengthMode then
+                                table.insert(prefixFilteredFallback, w)
+                            end
+                        end
+                    end
+                    if #prefixFilteredFallback > 300 then break end
+                end
+            end
+        else
+            for _, w in ipairs(FallbackWords) do
+                if not Blacklist[w] and not UsedWords[w] then
+                    if lengthMode == 0 or #w == lengthMode then
+                        table.insert(prefixFilteredFallback, w)
+                    end
+                end
+                if #prefixFilteredFallback > 300 then break end
+            end
+        end
+        
         local suffixFallbackFound = {}
         for _, suffix in ipairs(suffixList) do
             if not suffixPrimaryFound[suffix] then
-                -- Search FALLBACK words for this suffix
-                for _, w in ipairs(FallbackWords) do
-                    if not suffixFallbackFound[suffix] then
-                        if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
-                            if lengthMode == 0 or #w == lengthMode then
-                                if not Blacklist[w] and not UsedWords[w] then
-                                    if #w >= #suffix and w:sub(-#suffix) == suffix then
-                                        suffixFallbackFound[suffix] = w
-                                        usedInSuffix[w] = true
-                                        break
-                                    end
-                                end
-                            end
-                        end
+                for _, w in ipairs(prefixFilteredFallback) do
+                    if #w >= #suffix and w:sub(-#suffix) == suffix then
+                        suffixFallbackFound[suffix] = w
+                        usedInSuffix[w] = true
+                        break
                     end
                 end
             end
         end
         
-        -- Build ordered suffix words (PRIMARY first, then FALLBACK for missing)
         for _, suffix in ipairs(suffixList) do
             if suffixPrimaryFound[suffix] then
                 table.insert(orderedSuffixWords, suffixPrimaryFound[suffix])
