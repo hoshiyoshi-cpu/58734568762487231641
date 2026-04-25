@@ -1963,109 +1963,90 @@ UpdateList = function(detectedText, requiredLetter)
     -- Track used suffix words
     if not UsedSuffixWords then UsedSuffixWords = {} end
     
-    local suffixWords = {}  -- 1 per suffix
-    local primaryRemaining = {}
-    local fallbackRemaining = {}
-    local suffixFound = {}  -- Track which suffixes we've found
+    -- FIRST PASS: ONLY search PRIMARY words for suffix matches
+    local suffixPrimaryFound = {}
     local usedInSuffix = {}
     
-    -- FIRST: Try to use cached suffix words, but verify they're still the shortest
-    -- For each suffix, we'll check if a SHORTER word exists
-    local needRescan = false
+    local prefixLen = #searchPrefix
+    
     for _, suffix in ipairs(suffixList) do
-        local cached = UsedSuffixWords[suffix]
-        if cached and not UsedWords[cached] and not Blacklist[cached] then
-            -- Verify it starts with our prefix
-            if cached:sub(1, #searchPrefix) == searchPrefix then
-                if lengthMode == 0 or #cached == lengthMode then
-                    -- Check if there's a SHORTER word for this suffix
-                    -- We only need to scan until we find a word shorter than cached
-                    local foundShorter = false
-                    local prefixLen = #searchPrefix
-                    
-                    for _, w in ipairs(bucket) do
+        -- Search PRIMARY words for this suffix
+        for _, w in ipairs(PrimaryWords) do
+            if not suffixPrimaryFound[suffix] then
+                if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
+                    if lengthMode == 0 or #w == lengthMode then
+                        if not Blacklist[w] and not UsedWords[w] then
+                            if #w >= #suffix and w:sub(-#suffix) == suffix then
+                                suffixPrimaryFound[suffix] = w
+                                usedInSuffix[w] = true
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Check if EVERY suffix was found in PRIMARY
+    local allSuffixesFound = true
+    for _, suffix in ipairs(suffixList) do
+        if not suffixPrimaryFound[suffix] then
+            allSuffixesFound = false
+            break
+        end
+    end
+    
+    -- Build ordered suffix words from PRIMARY found
+    local orderedSuffixWords = {}
+    if allSuffixesFound then
+        for _, suffix in ipairs(suffixList) do
+            if suffixPrimaryFound[suffix] then
+                table.insert(orderedSuffixWords, suffixPrimaryFound[suffix])
+                -- Cache the found word
+                UsedSuffixWords[suffix] = suffixPrimaryFound[suffix]
+            end
+        end
+    else
+        -- NOT all suffixes found in PRIMARY, now try FALLBACK for missing ones
+        local suffixFallbackFound = {}
+        for _, suffix in ipairs(suffixList) do
+            if not suffixPrimaryFound[suffix] then
+                -- Search FALLBACK words for this suffix
+                for _, w in ipairs(FallbackWords) do
+                    if not suffixFallbackFound[suffix] then
                         if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
                             if lengthMode == 0 or #w == lengthMode then
                                 if not Blacklist[w] and not UsedWords[w] then
                                     if #w >= #suffix and w:sub(-#suffix) == suffix then
-                                        if #w < #cached then
-                                            -- Found a shorter word!
-                                            suffixFound[suffix] = w
-                                            usedInSuffix[w] = true
-                                            UsedSuffixWords[suffix] = w
-                                            foundShorter = true
-                                            break
-                                        elseif w == cached then
-                                            -- Cached word is still valid and shortest found so far
-                                            suffixFound[suffix] = cached
-                                            usedInSuffix[cached] = true
-                                            break
-                                        end
+                                        suffixFallbackFound[suffix] = w
+                                        usedInSuffix[w] = true
+                                        break
                                     end
                                 end
                             end
                         end
                     end
-                    
-                    if not foundShorter and not suffixFound[suffix] then
-                        -- No shorter word found, keep cached
-                        suffixFound[suffix] = cached
-                        usedInSuffix[cached] = true
-                    end
                 end
-            else
-                needRescan = true
-            end
-        else
-            needRescan = true
-        end
-    end
-    
-    -- For suffixes that need a new word (no cached or cached invalid), find the shortest
-    if needRescan then
-        local prefixLen = #searchPrefix
-        local suffixesNeeded = {}
-        for _, suffix in ipairs(suffixList) do
-            if not suffixFound[suffix] then
-                suffixesNeeded[suffix] = true
             end
         end
         
-        -- Scan until we find all needed suffixes (stop early!)
-        for _, w in ipairs(bucket) do
-            if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
-                if lengthMode == 0 or #w == lengthMode then
-                    if not Blacklist[w] and not UsedWords[w] then
-                        for _, suffix in ipairs(suffixList) do
-                            if suffixesNeeded[suffix] then
-                                if #w >= #suffix and w:sub(-#suffix) == suffix then
-                                    suffixFound[suffix] = w
-                                    usedInSuffix[w] = true
-                                    UsedSuffixWords[suffix] = w
-                                    suffixesNeeded[suffix] = nil
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
+        -- Build ordered suffix words (PRIMARY first, then FALLBACK for missing)
+        for _, suffix in ipairs(suffixList) do
+            if suffixPrimaryFound[suffix] then
+                table.insert(orderedSuffixWords, suffixPrimaryFound[suffix])
+                UsedSuffixWords[suffix] = suffixPrimaryFound[suffix]
+            elseif suffixFallbackFound[suffix] then
+                table.insert(orderedSuffixWords, suffixFallbackFound[suffix])
+                UsedSuffixWords[suffix] = suffixFallbackFound[suffix]
             end
-            
-            -- Stop once we've found all needed suffixes
-            local allFound = true
-            for _, suffix in ipairs(suffixList) do
-                if not suffixFound[suffix] then
-                    allFound = false
-                    break
-                end
-            end
-            if allFound then break end
         end
     end
     
-    -- Now collect regular words (limit to 40 total)
-    local prefixLen = #searchPrefix
-    local neededRegular = 40 - #suffixFound
+    -- Now collect regular words (excluding suffix words used)
+    local primaryRemaining = {}
+    local fallbackRemaining = {}
+    local neededRegular = 40 - #orderedSuffixWords
     
     for _, w in ipairs(bucket) do
         if #primaryRemaining + #fallbackRemaining >= neededRegular then break end
@@ -2082,14 +2063,6 @@ UpdateList = function(detectedText, requiredLetter)
                     end
                 end
             end
-        end
-    end
-    
-    -- Build suffix words list in priority order
-    local orderedSuffixWords = {}
-    for _, suffix in ipairs(suffixList) do
-        if suffixFound[suffix] then
-            table.insert(orderedSuffixWords, suffixFound[suffix])
         end
     end
     
@@ -2184,7 +2157,9 @@ UpdateList = function(detectedText, requiredLetter)
         StatusText.TextColor3 = THEME.SubText
     end
 
-    -- Update buttons (same as before)
+    -- Update buttons
+    local giveWordsLookupLocal = GiveWordsLookup
+    
     for i = 1, math.max(#displayList, #ButtonCache) do
         local w = displayList[i]
         local btn = ButtonCache[i]
@@ -2209,6 +2184,22 @@ UpdateList = function(detectedText, requiredLetter)
                 lbl.TextXAlignment = Enum.TextXAlignment.Left
                 lbl.RichText = true
 
+                -- Add give indicator for PRIMARY words
+                if giveWordsLookupLocal and giveWordsLookupLocal[w] then
+                    local giveIndicator = Instance.new("TextLabel", btn)
+                    giveIndicator.Name = "GiveIndicator"
+                    giveIndicator.Size = UDim2.new(0, 30, 1, 0)
+                    giveIndicator.Position = UDim2.new(1, -35, 0, 0)
+                    giveIndicator.BackgroundTransparency = 1
+                    giveIndicator.Text = "🎁"
+                    giveIndicator.Font = Enum.Font.GothamBold
+                    giveIndicator.TextSize = 12
+                    giveIndicator.TextColor3 = THEME.Success
+                    giveIndicator.TextXAlignment = Enum.TextXAlignment.Right
+                    -- Adjust main label width to make room
+                    lbl.Size = UDim2.new(1, -45, 1, 0)
+                end
+
                 btn.MouseEnter:Connect(function() Tween(btn, {BackgroundColor3 = Color3.fromRGB(45,45,55)}) end)
                 btn.MouseLeave:Connect(function() Tween(btn, {BackgroundColor3 = THEME.ItemBG}) end)
 
@@ -2231,6 +2222,27 @@ UpdateList = function(detectedText, requiredLetter)
                 btn.Parent = ScrollList
                 btn.BackgroundColor3 = THEME.ItemBG
                 if lbl then lbl.TextColor3 = THEME.Text end
+                
+                -- Update give indicator (in case word changed)
+                local existingIndicator = btn:FindFirstChild("GiveIndicator")
+                if giveWordsLookupLocal and giveWordsLookupLocal[w] then
+                    if not existingIndicator then
+                        local giveIndicator = Instance.new("TextLabel", btn)
+                        giveIndicator.Name = "GiveIndicator"
+                        giveIndicator.Size = UDim2.new(0, 30, 1, 0)
+                        giveIndicator.Position = UDim2.new(1, -35, 0, 0)
+                        giveIndicator.BackgroundTransparency = 1
+                        giveIndicator.Text = "🎁"
+                        giveIndicator.Font = Enum.Font.GothamBold
+                        giveIndicator.TextSize = 12
+                        giveIndicator.TextColor3 = THEME.Success
+                        giveIndicator.TextXAlignment = Enum.TextXAlignment.Right
+                        if lbl then lbl.Size = UDim2.new(1, -45, 1, 0) end
+                    end
+                elseif existingIndicator then
+                    existingIndicator:Destroy()
+                    if lbl then lbl.Size = UDim2.new(1, -20, 1, 0) end
+                end
             end
 
             ButtonData[btn] = {word = w, detected = detectedText}
