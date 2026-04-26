@@ -371,185 +371,6 @@ SeenWords = nil
 -- SORTERS
 -- =============================================
 
--- =============================================
--- HARD MODE SORT - Prioritizes deadly suffixes
--- =============================================
-
-local function HardSort(wordList, currentPrefix, usedWordsSet)
-    local giveWordsLookup = GiveWordsLookup
-    local MAX_WORDS = 40
-    
-    -- Define suffix categories
-    local deadlySuffixes = {}  -- 4-letter suffixes not starting with A or S
-    local dangerousSuffixes = {} -- 4-letter suffixes starting with A or S
-    local otherSuffixes = {} -- 3-letter or other suffixes
-    
-    -- Get configured suffixes from SuffixModes
-    local suffixList = Config.SuffixModes or {}
-    local suffixPriority = {}
-    for idx, s in ipairs(suffixList) do
-        suffixPriority[s] = idx
-    end
-    
-    -- Categorize each word
-    local primaryGiveWords = {}  -- Give words (highest priority)
-    local deadlyMatches = {}     -- 4-letter deadly suffixes
-    local dangerousMatches = {}  -- 4-letter A/S suffixes
-    local otherMatches = {}      -- 3-letter and other suffixes
-    local noSuffixWords = {}     -- No suffix match
-    
-    for i = 1, #wordList do
-        local word = wordList[i]
-        local wl = word:lower()
-        local len = #wl
-        
-        -- Give words always go to top (but after deadly check)
-        if giveWordsLookup[wl] then
-            table.insert(primaryGiveWords, {word = word, wl = wl, len = len})
-        else
-            -- Check for suffix matches (prioritize longer suffixes)
-            local bestMatch = nil
-            local bestPriority = 999
-            local bestLength = 0
-            
-            for _, s in ipairs(suffixList) do
-                if len >= #s and wl:sub(-#s) == s then
-                    local p = suffixPriority[s] or 999
-                    if #s > bestLength or (#s == bestLength and p < bestPriority) then
-                        bestLength = #s
-                        bestPriority = p
-                        bestMatch = s
-                    end
-                end
-            end
-            
-            if bestMatch then
-                local suffixLen = #bestMatch
-                local firstChar = bestMatch:sub(1,1):lower()
-                
-                -- Categorize by suffix length and starting letter
-                if suffixLen >= 4 then
-                    if firstChar ~= 'a' and firstChar ~= 's' then
-                        -- Deadly: 4+ letters not starting with A or S
-                        table.insert(deadlyMatches, {word = word, wl = wl, len = len, suffix = bestMatch})
-                    else
-                        -- Dangerous: 4+ letters starting with A or S
-                        table.insert(dangerousMatches, {word = word, wl = wl, len = len, suffix = bestMatch})
-                    end
-                else
-                    -- Other suffixes (3 letters or less)
-                    table.insert(otherMatches, {word = word, wl = wl, len = len, suffix = bestMatch})
-                end
-            else
-                -- No suffix match - lowest priority
-                table.insert(noSuffixWords, {word = word, wl = wl, len = len})
-            end
-        end
-    end
-    
-    -- Shuffle helper
-    local function shuffle(t)
-        for i = #t, 2, -1 do
-            local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
-        end
-        return t
-    end
-    
-    -- Group by length and shuffle within groups (keeps variety)
-    local function groupByLengthAndShuffle(words)
-        local lengthGroups = {}
-        local orderTracker = {}
-        
-        for _, item in ipairs(words) do
-            local len = item.len
-            if not lengthGroups[len] then
-                lengthGroups[len] = {}
-                table.insert(orderTracker, len)
-            end
-            table.insert(lengthGroups[len], item)
-        end
-        
-        table.sort(orderTracker)
-        
-        for len, group in pairs(lengthGroups) do
-            lengthGroups[len] = shuffle(group)
-        end
-        
-        local result = {}
-        for _, len in ipairs(orderTracker) do
-            for _, item in ipairs(lengthGroups[len]) do
-                table.insert(result, item.word)
-            end
-        end
-        return result
-    end
-    
-    -- Shuffle within each category while preserving priority order
-    local shuffledDeadly = groupByLengthAndShuffle(deadlyMatches)
-    local shuffledDangerous = groupByLengthAndShuffle(dangerousMatches)
-    local shuffledGiveWords = groupByLengthAndShuffle(primaryGiveWords)
-    local shuffledOther = groupByLengthAndShuffle(otherMatches)
-    local shuffledNoSuffix = groupByLengthAndShuffle(noSuffixWords)
-    
-    -- Build final result in HARD MODE priority order:
-    -- 1. DEADLY suffixes (4+ letters, not A/S) - These are hardest for opponents
-    -- 2. Give words (but only if no deadly options exist, keep them balanced)
-    -- 3. Dangerous suffixes (4+ letters starting with A/S)
-    -- 4. Other suffixes (3 letters or less)
-    -- 5. No suffix words
-    local result = {}
-    
-    -- Prioritize deadly suffixes first
-    for _, word in ipairs(shuffledDeadly) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
-    end
-    
-    -- If we have deadly words, only add a few give words mixed in for variety
-    if #deadlyMatches > 0 then
-        -- Add up to 5 give words mixed in (but don't overshadow deadly)
-        for i = 1, math.min(5, #shuffledGiveWords) do
-            if #result >= MAX_WORDS then break end
-            table.insert(result, shuffledGiveWords[i])
-        end
-    else
-        -- No deadly words available, give words become primary
-        for _, word in ipairs(shuffledGiveWords) do
-            if #result >= MAX_WORDS then break end
-            table.insert(result, word)
-        end
-    end
-    
-    -- Add dangerous suffixes (4-letter A/S)
-    for _, word in ipairs(shuffledDangerous) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
-    end
-    
-    -- Add other suffixes (3 letters or less)
-    for _, word in ipairs(shuffledOther) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
-    end
-    
-    -- Add remaining give words if any
-    if #deadlyMatches == 0 then
-        for _, word in ipairs(shuffledGiveWords) do
-            if #result >= MAX_WORDS then break end
-            table.insert(result, word)
-        end
-    end
-    
-    -- Finally, no suffix words
-    for _, word in ipairs(shuffledNoSuffix) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
-    end
-    
-    return result
-end
-
 local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     local giveWordsLookup = GiveWordsLookup
     local SHORT_THRESHOLD = 5
@@ -1122,8 +943,6 @@ local SortBtn = CreateToggle("Sort: "..sortMode, UDim2.new(0, 15, 0, 5), UDim2.n
         sortMode = "Smart"
     elseif sortMode == "Smart" then
         sortMode = "Strategic"
-    elseif sortMode == "Strategic" then
-        sortMode = "Hard"
     else
         sortMode = "Shortest"
     end
@@ -2328,8 +2147,6 @@ UpdateList = function(detectedText, requiredLetter)
     local sortedPrimary = {}
     if sortMode == "Strategic" then
         sortedPrimary = StrategicSort(primaryRemaining, searchPrefix, UsedWords)
-    elseif sortMode == "Hard" then
-        sortedPrimary = HardSort(primaryRemaining, searchPrefix, UsedWords)
     elseif sortMode == "Shortest" then
         table.sort(primaryRemaining, function(a,b) return #a < #b end)
         sortedPrimary = primaryRemaining
@@ -2347,8 +2164,6 @@ UpdateList = function(detectedText, requiredLetter)
     local sortedFallback = {}
     if sortMode == "Strategic" then
         sortedFallback = StrategicSort(fallbackRemaining, searchPrefix, UsedWords)
-    elseif sortMode == "Hard" then
-        sortedFallback = HardSort(fallbackRemaining, searchPrefix, UsedWords)
     elseif sortMode == "Shortest" then
         table.sort(fallbackRemaining, function(a,b) return #a < #b end)
         sortedFallback = fallbackRemaining
