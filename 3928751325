@@ -509,72 +509,75 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
 end
 
 local function SmartSort(wordList, currentPrefix, usedWordsSet)
-    local giveWordsLookup = GiveWordsLookup
-    local MEDIUM_MIN = 6
-    local MEDIUM_MAX = 9
-    local MAX_WORDS = 40
-    
-    -- Separate words by type and length
-    local giveMedium = {}   -- 6-9 letters from gives.txt
-    local giveShort = {}    -- <=5 letters from gives.txt  
-    local giveLong = {}     -- 10+ letters from gives.txt
-    local regularWords = {} -- all non-give words
-    
-    for _, word in ipairs(wordList) do
-        local wl = word:lower()
-        local len = #wl
-        
-        if giveWordsLookup[wl] then
-            if len >= MEDIUM_MIN and len <= MEDIUM_MAX then
-                table.insert(giveMedium, word)
-            elseif len <= 5 then
-                table.insert(giveShort, word)
-            else
-                table.insert(giveLong, word)
+    local customFiltered = {}
+    if Config.CustomWords and #Config.CustomWords > 0 then
+        for _, word in ipairs(wordList) do
+            for _, customPrefix in ipairs(Config.CustomWords) do
+                if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
+                    table.insert(customFiltered, word)
+                    break
+                end
             end
+        end
+    else
+        customFiltered = wordList
+    end
+    
+    local SHORT_THRESHOLD = 6
+    local shortWords = {}
+    local longWords = {}
+    
+    for _, word in ipairs(customFiltered) do
+        if #word <= SHORT_THRESHOLD then
+            table.insert(shortWords, word)
         else
-            table.insert(regularWords, word)
+            table.insert(longWords, word)
         end
     end
     
-    -- Shuffle function for randomness
-    local function shuffle(t)
-        for i = #t, 2, -1 do
-            local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
-        end
-        return t
-    end
-    
-    -- Build result: Medium gives FIRST (6-9 letters)
     local result = {}
     
-    -- 1. Medium give words (6-9 letters) - BEST
-    local shuffledMedium = shuffle(giveMedium)
-    for _, word in ipairs(shuffledMedium) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
+    local lengthGroups = {}
+    for _, word in ipairs(shortWords) do
+        local len = #word
+        if not lengthGroups[len] then
+            lengthGroups[len] = {}
+        end
+        table.insert(lengthGroups[len], word)
     end
     
-    -- 2. Short give words (<=5)
-    local shuffledShort = shuffle(giveShort)
-    for _, word in ipairs(shuffledShort) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
+    for len, group in pairs(lengthGroups) do
+        for i = #group, 2, -1 do
+            local j = math.random(i)
+            group[i], group[j] = group[j], group[i]
+        end
     end
     
-    -- 3. Long give words (10+)
-    local shuffledLong = shuffle(giveLong)
-    for _, word in ipairs(shuffledLong) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
+    for len = 1, SHORT_THRESHOLD do
+        if lengthGroups[len] then
+            for _, word in ipairs(lengthGroups[len]) do
+                table.insert(result, word)
+            end
+        end
     end
     
-    -- 4. Regular words (non-give)
-    local shuffledRegular = shuffle(regularWords)
-    for _, word in ipairs(shuffledRegular) do
-        if #result >= MAX_WORDS then break end
-        table.insert(result, word)
+    if #longWords > 0 then
+        for i = #longWords, 2, -1 do
+            local j = math.random(i)
+            longWords[i], longWords[j] = longWords[j], longWords[i]
+        end
+        
+        for i = 1, math.min(30, #longWords) do
+            table.insert(result, longWords[i])
+        end
+    end
+    
+    if #result > 40 then
+        local final = {}
+        for i = 1, 40 do
+            table.insert(final, result[i])
+        end
+        return final
     end
     
     return result
