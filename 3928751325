@@ -509,75 +509,106 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
 end
 
 local function SmartSort(wordList, currentPrefix, usedWordsSet)
-    local customFiltered = {}
-    if Config.CustomWords and #Config.CustomWords > 0 then
-        for _, word in ipairs(wordList) do
-            for _, customPrefix in ipairs(Config.CustomWords) do
-                if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                    table.insert(customFiltered, word)
-                    break
-                end
+    local giveWordsLookup = GiveWordsLookup
+    local SHORT_THRESHOLD = 5
+    local MEDIUM_MIN = 6
+    local MEDIUM_MAX = 9
+    local MAX_WORDS = 40
+    
+    -- Separate give words by length category
+    local giveShort = {}   -- <=5 letters
+    local giveMedium = {}  -- 6-9 letters
+    local giveLong = {}    -- 10+ letters
+    local regularWords = {}
+    
+    for _, word in ipairs(wordList) do
+        local wl = word:lower()
+        local len = #wl
+        
+        if giveWordsLookup[wl] then
+            -- Give word - categorize by length
+            if len <= SHORT_THRESHOLD then
+                table.insert(giveShort, word)
+            elseif len >= MEDIUM_MIN and len <= MEDIUM_MAX then
+                table.insert(giveMedium, word)
+            else
+                table.insert(giveLong, word)
             end
-        end
-    else
-        customFiltered = wordList
-    end
-    
-    local SHORT_THRESHOLD = 6
-    local shortWords = {}
-    local longWords = {}
-    
-    for _, word in ipairs(customFiltered) do
-        if #word <= SHORT_THRESHOLD then
-            table.insert(shortWords, word)
         else
-            table.insert(longWords, word)
+            -- Regular word (not from gives.txt)
+            table.insert(regularWords, word)
         end
     end
     
-    local result = {}
-    
-    local lengthGroups = {}
-    for _, word in ipairs(shortWords) do
-        local len = #word
-        if not lengthGroups[len] then
-            lengthGroups[len] = {}
-        end
-        table.insert(lengthGroups[len], word)
-    end
-    
-    for len, group in pairs(lengthGroups) do
-        for i = #group, 2, -1 do
+    -- Function to shuffle a table randomly
+    local function shuffle(t)
+        for i = #t, 2, -1 do
             local j = math.random(i)
-            group[i], group[j] = group[j], group[i]
+            t[i], t[j] = t[j], t[i]
         end
+        return t
     end
     
-    for len = 1, SHORT_THRESHOLD do
-        if lengthGroups[len] then
+    -- Function to group by length then shuffle (keeps randomness but organized)
+    local function groupByLengthAndShuffle(words)
+        local lengthGroups = {}
+        local orderTracker = {}
+        
+        for _, word in ipairs(words) do
+            local len = #word
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+                table.insert(orderTracker, len)
+            end
+            table.insert(lengthGroups[len], word)
+        end
+        
+        table.sort(orderTracker)
+        
+        for len, group in pairs(lengthGroups) do
+            lengthGroups[len] = shuffle(group)
+        end
+        
+        local result = {}
+        for _, len in ipairs(orderTracker) do
             for _, word in ipairs(lengthGroups[len]) do
                 table.insert(result, word)
             end
         end
+        return result
     end
     
-    if #longWords > 0 then
-        for i = #longWords, 2, -1 do
-            local j = math.random(i)
-            longWords[i], longWords[j] = longWords[j], longWords[i]
-        end
-        
-        for i = 1, math.min(30, #longWords) do
-            table.insert(result, longWords[i])
-        end
+    -- Process each category
+    local processedGiveMedium = groupByLengthAndShuffle(giveMedium)
+    local processedGiveShort = groupByLengthAndShuffle(giveShort)
+    local processedGiveLong = groupByLengthAndShuffle(giveLong)
+    local processedRegular = groupByLengthAndShuffle(regularWords)
+    
+    -- Build final result: Medium gives FIRST, then short gives, then long gives, then regular words
+    local result = {}
+    
+    -- 1. Medium give words (6-9 letters) - HIGHEST PRIORITY in Random mode
+    for _, word in ipairs(processedGiveMedium) do
+        if #result >= MAX_WORDS then break end
+        table.insert(result, word)
     end
     
-    if #result > 40 then
-        local final = {}
-        for i = 1, 40 do
-            table.insert(final, result[i])
-        end
-        return final
+    -- 2. Short give words (<=5 letters)
+    for _, word in ipairs(processedGiveShort) do
+        if #result >= MAX_WORDS then break end
+        table.insert(result, word)
+    end
+    
+    -- 3. Long give words (10+ letters)
+    for _, word in ipairs(processedGiveLong) do
+        if #result >= MAX_WORDS then break end
+        table.insert(result, word)
+    end
+    
+    -- 4. Regular words (not from gives.txt)
+    for _, word in ipairs(processedRegular) do
+        if #result >= MAX_WORDS then break end
+        table.insert(result, word)
     end
     
     return result
