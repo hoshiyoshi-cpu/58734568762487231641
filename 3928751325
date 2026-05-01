@@ -509,75 +509,72 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
 end
 
 local function SmartSort(wordList, currentPrefix, usedWordsSet)
-    local customFiltered = {}
-    if Config.CustomWords and #Config.CustomWords > 0 then
-        for _, word in ipairs(wordList) do
-            for _, customPrefix in ipairs(Config.CustomWords) do
-                if word:lower():sub(1, #customPrefix) == customPrefix:lower() then
-                    table.insert(customFiltered, word)
-                    break
-                end
+    local giveWordsLookup = GiveWordsLookup
+    
+    -- Separate PRIMARY gives words (from gives.txt)
+    local giveWords = {}
+    local mediumGiveWords = {}  -- 6-9 letter gives words (PRIORITY)
+    local shortGiveWords = {}    -- 1-5 letter gives words
+    local longGiveWords = {}     -- 10+ letter gives words
+    local otherWords = {}
+    
+    for _, word in ipairs(wordList) do
+        local wl = word:lower()
+        local len = #wl
+        
+        -- Check if it's a PRIMARY give word
+        if giveWordsLookup[wl] then
+            if len >= 6 and len <= 9 then
+                table.insert(mediumGiveWords, word)  -- HIGHEST PRIORITY: 6-9 letters
+            elseif len <= 5 then
+                table.insert(shortGiveWords, word)
+            else
+                table.insert(longGiveWords, word)
             end
-        end
-    else
-        customFiltered = wordList
-    end
-    
-    local SHORT_THRESHOLD = 6
-    local shortWords = {}
-    local longWords = {}
-    
-    for _, word in ipairs(customFiltered) do
-        if #word <= SHORT_THRESHOLD then
-            table.insert(shortWords, word)
         else
-            table.insert(longWords, word)
+            table.insert(otherWords, word)
         end
     end
     
+    -- Shuffle each group randomly
+    local function shuffle(t)
+        for i = #t, 2, -1 do
+            local j = math.random(i)
+            t[i], t[j] = t[j], t[i]
+        end
+        return t
+    end
+    
+    shuffle(mediumGiveWords)
+    shuffle(shortGiveWords)
+    shuffle(longGiveWords)
+    shuffle(otherWords)
+    
+    -- Build result: medium gives FIRST, then short gives, then other words, then long gives
     local result = {}
     
-    local lengthGroups = {}
-    for _, word in ipairs(shortWords) do
-        local len = #word
-        if not lengthGroups[len] then
-            lengthGroups[len] = {}
-        end
-        table.insert(lengthGroups[len], word)
+    -- 1. Medium PRIMARY gives (6-9 letters) - TOP PRIORITY
+    for _, word in ipairs(mediumGiveWords) do
+        if #result >= 40 then break end
+        table.insert(result, word)
     end
     
-    for len, group in pairs(lengthGroups) do
-        for i = #group, 2, -1 do
-            local j = math.random(i)
-            group[i], group[j] = group[j], group[i]
-        end
+    -- 2. Short PRIMARY gives (1-5 letters)
+    for _, word in ipairs(shortGiveWords) do
+        if #result >= 40 then break end
+        table.insert(result, word)
     end
     
-    for len = 1, SHORT_THRESHOLD do
-        if lengthGroups[len] then
-            for _, word in ipairs(lengthGroups[len]) do
-                table.insert(result, word)
-            end
-        end
+    -- 3. All other words (non-give words)
+    for _, word in ipairs(otherWords) do
+        if #result >= 40 then break end
+        table.insert(result, word)
     end
     
-    if #longWords > 0 then
-        for i = #longWords, 2, -1 do
-            local j = math.random(i)
-            longWords[i], longWords[j] = longWords[j], longWords[i]
-        end
-        
-        for i = 1, math.min(30, #longWords) do
-            table.insert(result, longWords[i])
-        end
-    end
-    
-    if #result > 40 then
-        local final = {}
-        for i = 1, 40 do
-            table.insert(final, result[i])
-        end
-        return final
+    -- 4. Long PRIMARY gives (10+ letters) - lowest priority
+    for _, word in ipairs(longGiveWords) do
+        if #result >= 40 then break end
+        table.insert(result, word)
     end
     
     return result
