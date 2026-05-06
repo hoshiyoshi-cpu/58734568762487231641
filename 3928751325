@@ -1892,7 +1892,8 @@ local function GetMatchLength(str, prefix)
 end
 
 -- =============================================
--- MAIN WINDOW UPDATE LIST - SUFFIX PRIORITY FIRST FOR ALL MODES
+-- MAIN WINDOW UPDATE LIST - SUFFIX PRIORITY FIRST
+-- GIVES follow Smart/Random | FALLBACK always Shortest for those modes
 -- =============================================
 
 local lastRequiredLetter = ""
@@ -1996,36 +1997,48 @@ UpdateList = function(detectedText, requiredLetter)
     local sortedGive = {}
     if sortMode == "Strategic" then
         sortedGive = StrategicSort(giveWords, searchPrefix, UsedWords)
-    elseif sortMode == "Shortest" then
-        table.sort(giveWords, function(a,b) return #a < #b end)
-        sortedGive = giveWords
+    elseif sortMode == "Smart" then
+        -- Smart mode for GIVE words only
+        sortedGive = SmartSort(giveWords, searchPrefix, UsedWords)
     elseif sortMode == "Random" then
+        -- Random mode for GIVE words only
         for i = #giveWords, 2, -1 do
             local j = math.random(i)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    elseif sortMode == "Smart" then
-        sortedGive = SmartSort(giveWords, searchPrefix, UsedWords)
+    elseif sortMode == "Shortest" then
+        table.sort(giveWords, function(a,b) return #a < #b end)
+        sortedGive = giveWords
     else
         sortedGive = giveWords
     end
     
-    -- STEP 4: Sort FALLBACK words by selected mode
+    -- STEP 4: Sort FALLBACK words - ALWAYS SHORTEST for Random and Smart modes
     local sortedFallback = {}
     if sortMode == "Strategic" then
         sortedFallback = StrategicSort(fallbackWords, searchPrefix, UsedWords)
-    elseif sortMode == "Shortest" then
-        table.sort(fallbackWords, function(a,b) return #a < #b end)
+    elseif sortMode == "Smart" then
+        -- Smart mode: FALLBACK = SHORTEST only
+        table.sort(fallbackWords, function(a,b) 
+            if #a ~= #b then return #a < #b end
+            return a < b
+        end)
         sortedFallback = fallbackWords
     elseif sortMode == "Random" then
-        for i = #fallbackWords, 2, -1 do
-            local j = math.random(i)
-            fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
-        end
+        -- Random mode: FALLBACK = SHORTEST only
+        table.sort(fallbackWords, function(a,b) 
+            if #a ~= #b then return #a < #b end
+            return a < b
+        end)
         sortedFallback = fallbackWords
-    elseif sortMode == "Smart" then
-        sortedFallback = SmartSort(fallbackWords, searchPrefix, UsedWords)
+    elseif sortMode == "Shortest" then
+        -- Shortest mode: both give and fallback are shortest
+        table.sort(fallbackWords, function(a,b) 
+            if #a ~= #b then return #a < #b end
+            return a < b
+        end)
+        sortedFallback = fallbackWords
     else
         sortedFallback = fallbackWords
     end
@@ -2040,14 +2053,14 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- 2. Give words
+    -- 2. Give words (sorted by selected mode)
     for _, w in ipairs(sortedGive) do
         if #matches < 40 then
             table.insert(matches, w)
         end
     end
     
-    -- 3. Fallback words
+    -- 3. Fallback words (sorted by mode rules)
     for _, w in ipairs(sortedFallback) do
         if #matches < 40 then
             table.insert(matches, w)
@@ -2072,7 +2085,7 @@ UpdateList = function(detectedText, requiredLetter)
         StatusText.TextColor3 = THEME.SubText
     end
 
-    -- Update buttons
+    -- Update buttons (same as before)
     local giveWordsLookupLocal = GiveWordsLookup
     
     for i = 1, math.max(#displayList, #ButtonCache) do
