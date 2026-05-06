@@ -368,7 +368,7 @@ end
 SeenWords = nil
 
 -- =============================================
--- ENHANCED SORTERS - GIVE words get Smart/Random, others get Shortest
+-- SORTERS - GIVE words get Smart/Random, others get Shortest
 -- =============================================
 
 -- Function to sort GIVE words (PRIMARY words) by Smart/Random modes
@@ -1974,7 +1974,7 @@ local function CheckSuffix(w)
 end
 
 -- =============================================
--- MAIN WINDOW UPDATE LIST
+-- MAIN WINDOW UPDATE LIST (FIXED)
 -- =============================================
 
 local lastRequiredLetter = ""
@@ -2021,158 +2021,24 @@ UpdateList = function(detectedText, requiredLetter)
     local primarySet = {}
     for _, w in ipairs(PrimaryWords) do primarySet[w] = true end
     
-    -- FIX 1: Periodic cleanup of suffix cache (every 5 minutes)
-    if not lastCacheCleanup then lastCacheCleanup = tick() end
-    if tick() - lastCacheCleanup > 300 then
-        lastCacheCleanup = tick()
-        UsedSuffixWords = {}
-        ShowToast("Cleared suffix cache", "warning")
-    end
-    
-    -- Track used suffix words
-    if not UsedSuffixWords then UsedSuffixWords = {} end
-    
-    -- FIX 2: OPTIMIZED - FIRST PASS - ONLY search PRIMARY words for suffix matches
-    local suffixPrimaryFound = {}
-    local usedInSuffix = {}
+    -- Collect ALL matching words first (preserving original logic)
+    local allMatchingWords = {}
     local prefixLen = #searchPrefix
     
-    -- Pre-filter PRIMARY words that start with our prefix (build once per letter)
-    local prefixFilteredPrimary = {}
-    if prefixLen > 0 then
-        local pBucket = PrimaryBuckets[searchPrefix:sub(1,1)]
-        if pBucket then
-            for _, w in ipairs(pBucket) do
-                if prefixLen == 1 or w:sub(1, prefixLen) == searchPrefix then
-                    if not Blacklist[w] and not UsedWords[w] then
-                        if lengthMode == 0 or #w == lengthMode then
-                            table.insert(prefixFilteredPrimary, w)
-                        end
-                    end
-                end
-            end
-        end
-    else
-        -- Use full PrimaryWords but limit iteration
-        for _, w in ipairs(PrimaryWords) do
-            if not Blacklist[w] and not UsedWords[w] then
-                if lengthMode == 0 or #w == lengthMode then
-                    table.insert(prefixFilteredPrimary, w)
-                end
-            end
-            if #prefixFilteredPrimary > 500 then break end -- Cap for performance
-        end
-    end
-    
-    -- Now find suffix matches from the filtered list
-    for _, suffix in ipairs(suffixList) do
-        if not suffixPrimaryFound[suffix] then
-            for _, w in ipairs(prefixFilteredPrimary) do
-                if #w >= #suffix and w:sub(-#suffix) == suffix then
-                    suffixPrimaryFound[suffix] = w
-                    usedInSuffix[w] = true
-                    break
-                end
-            end
-        end
-    end
-    
-    -- Check if EVERY suffix was found in PRIMARY
-    local allSuffixesFound = true
-    for _, suffix in ipairs(suffixList) do
-        if not suffixPrimaryFound[suffix] then
-            allSuffixesFound = false
-            break
-        end
-    end
-    
-    -- Build ordered suffix words
-    local orderedSuffixWords = {}
-    if allSuffixesFound then
-        for _, suffix in ipairs(suffixList) do
-            if suffixPrimaryFound[suffix] then
-                table.insert(orderedSuffixWords, suffixPrimaryFound[suffix])
-                UsedSuffixWords[suffix] = suffixPrimaryFound[suffix]
-            end
-        end
-    else
-        -- FALLBACK: Pre-filter FallbackWords for missing suffixes
-        local prefixFilteredFallback = {}
-        if prefixLen > 0 then
-            local fBucket = Buckets[searchPrefix:sub(1,1)]
-            if fBucket then
-                for _, w in ipairs(fBucket) do
-                    if prefixLen == 1 or w:sub(1, prefixLen) == searchPrefix then
-                        if not Blacklist[w] and not UsedWords[w] and not primarySet[w] then
-                            if lengthMode == 0 or #w == lengthMode then
-                                table.insert(prefixFilteredFallback, w)
-                            end
-                        end
-                    end
-                    if #prefixFilteredFallback > 300 then break end
-                end
-            end
-        else
-            for _, w in ipairs(FallbackWords) do
-                if not Blacklist[w] and not UsedWords[w] then
-                    if lengthMode == 0 or #w == lengthMode then
-                        table.insert(prefixFilteredFallback, w)
-                    end
-                end
-                if #prefixFilteredFallback > 300 then break end
-            end
-        end
-        
-        local suffixFallbackFound = {}
-        for _, suffix in ipairs(suffixList) do
-            if not suffixPrimaryFound[suffix] then
-                for _, w in ipairs(prefixFilteredFallback) do
-                    if #w >= #suffix and w:sub(-#suffix) == suffix then
-                        suffixFallbackFound[suffix] = w
-                        usedInSuffix[w] = true
-                        break
-                    end
-                end
-            end
-        end
-        
-        for _, suffix in ipairs(suffixList) do
-            if suffixPrimaryFound[suffix] then
-                table.insert(orderedSuffixWords, suffixPrimaryFound[suffix])
-                UsedSuffixWords[suffix] = suffixPrimaryFound[suffix]
-            elseif suffixFallbackFound[suffix] then
-                table.insert(orderedSuffixWords, suffixFallbackFound[suffix])
-                UsedSuffixWords[suffix] = suffixFallbackFound[suffix]
-            end
-        end
-    end
-    
-    -- Now collect regular words (excluding suffix words used)
-    local primaryRemaining = {}
-    local fallbackRemaining = {}
-    local neededRegular = 40 - #orderedSuffixWords
-    
     for _, w in ipairs(bucket) do
-        if #primaryRemaining + #fallbackRemaining >= neededRegular then break end
+        if #allMatchingWords >= 500 then break end  -- Limit for performance
         
         if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
             if lengthMode == 0 or #w == lengthMode then
                 if not Blacklist[w] and not UsedWords[w] then
-                    if not usedInSuffix[w] then
-                        if primarySet[w] then
-                            table.insert(primaryRemaining, w)
-                        else
-                            table.insert(fallbackRemaining, w)
-                        end
-                    end
+                    table.insert(allMatchingWords, w)
                 end
             end
         end
     end
     
-    -- Handle partial matches if no words found at all
-    if #orderedSuffixWords == 0 and #primaryRemaining == 0 and #fallbackRemaining == 0 then
-        -- Try partial matching (backtracking)
+    -- If no matches, try partial matching
+    if #allMatchingWords == 0 then
         local maxPartialLen = 0
         local partialMatches = {}
         for _, w in ipairs(bucket) do
@@ -2189,41 +2055,44 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         if #partialMatches > 0 then
-            for _, w in ipairs(partialMatches) do
-                if primarySet[w] then
-                    table.insert(primaryRemaining, w)
-                else
-                    table.insert(fallbackRemaining, w)
-                end
-            end
+            allMatchingWords = partialMatches
             searchPrefix = searchPrefix:sub(1, maxPartialLen)
             isBacktracked = true
         end
     end
     
-    -- PRIMARY words (gives) get Smart/Random mode sorting
-    local sortedPrimary = {}
-    if #primaryRemaining > 0 then
-        if sortMode == "Shortest" then
-            -- Even in shortest mode, give words still appear first (just sorted by length)
-            table.sort(primaryRemaining, function(a,b) return #a < #b end)
-            sortedPrimary = primaryRemaining
+    -- Separate GIVE words (Primary) from NON-GIVE words (Fallback + Custom)
+    local giveWordsTemp = {}
+    local nonGiveWordsTemp = {}
+    
+    for _, w in ipairs(allMatchingWords) do
+        if primarySet[w] then
+            table.insert(giveWordsTemp, w)
         else
-            -- Smart, Random, or Strategic modes for give words
-            sortedPrimary = SortGiveWords(primaryRemaining, searchPrefix, UsedWords)
+            table.insert(nonGiveWordsTemp, w)
         end
     end
     
-    -- FALLBACK words (non-gives) always sorted by shortest (ascending length)
-    local sortedFallback = SortNonGiveWords(fallbackRemaining, searchPrefix, UsedWords)
+    -- Sort GIVE words based on user mode (Smart/Random/Strategic)
+    local sortedGiveWords = SortGiveWords(giveWordsTemp, searchPrefix, UsedWords)
     
-    -- Build final result (limit to 40)
-    local result = {}
-    for _, w in ipairs(orderedSuffixWords) do if #result < 40 then table.insert(result, w) end end
-    for _, w in ipairs(sortedPrimary) do if #result < 40 then table.insert(result, w) end end
-    for _, w in ipairs(sortedFallback) do if #result < 40 then table.insert(result, w) end end
+    -- Sort NON-GIVE words by shortest first (always)
+    local sortedNonGiveWords = SortNonGiveWords(nonGiveWordsTemp, searchPrefix, UsedWords)
     
-    local matches = result
+    -- Build final result: GIVE words first (user sorted), then shortest non-give words
+    local matches = {}
+    
+    -- 1. Add all GIVE words (already sorted by user mode)
+    for _, word in ipairs(sortedGiveWords) do
+        if #matches >= 40 then break end
+        table.insert(matches, word)
+    end
+    
+    -- 2. Add non-give words (shortest first)
+    for _, word in ipairs(sortedNonGiveWords) do
+        if #matches >= 40 then break end
+        table.insert(matches, word)
+    end
 
     -- Display the results
     local displayList = {}
@@ -2462,16 +2331,6 @@ runConn = RunService.Heartbeat:Connect(function()
             elseif frame.Parent:IsA("GuiObject") then
                 isVisible = frame.Parent.Visible
             end
-            typeLbl = frame:FindFirstChild("Type")
-            if typeLbl then
-                typeVisible = typeLbl.Visible
-                if typeVisible and not lastTypeVisible then
-                    UsedWords = {}
-                    StatusText.Text = "New Round - Words Reset"
-                    StatusText.TextColor3 = THEME.Success
-                end
-                lastTypeVisible = typeVisible
-            end
         end
 
         local seconds = nil
@@ -2500,6 +2359,15 @@ runConn = RunService.Heartbeat:Connect(function()
             lastWordCheck = now
         end
         local detected, censored = cachedDetected, cachedCensored
+
+        local typeLbl = frame and frame:FindFirstChild("Type")
+        local typeVisible = typeLbl and typeLbl.Visible
+        if typeVisible and not lastTypeVisible then
+            UsedWords = {}
+            StatusText.Text = "New Round - Words Reset"
+            StatusText.TextColor3 = THEME.Success
+        end
+        lastTypeVisible = typeVisible
 
         if lastManualInput ~= "" and (detected == "" or #detected < #lastManualInput) then
             UsedWords[lastManualInput] = tick()
