@@ -857,22 +857,6 @@ SearchBox.Text = ""
 SearchBox.TextXAlignment = Enum.TextXAlignment.Left
 SearchBox.ClearTextOnFocus = false
 
-SearchBox.Focused:Connect(function()
-end)
-
--- Handle Ctrl+A properly
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    -- Check for Ctrl+A
-    if input.KeyCode == Enum.KeyCode.A and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
-        if SearchBox:IsFocused() then
-            -- Small delay to let native selection work
-            task.wait(0.01)
-        end
-    end
-end)
-
 SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
     if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
 end)
