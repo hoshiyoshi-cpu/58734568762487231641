@@ -368,8 +368,39 @@ end
 SeenWords = nil
 
 -- =============================================
--- SORTERS
+-- ENHANCED SORTERS - GIVE words get Smart/Random, others get Shortest
 -- =============================================
+
+-- Function to sort GIVE words (PRIMARY words) by Smart/Random modes
+local function SortGiveWords(wordList, currentPrefix, usedWordsSet)
+    if sortMode == "Strategic" then
+        return StrategicSort(wordList, currentPrefix, usedWordsSet)
+    elseif sortMode == "Shortest" then
+        table.sort(wordList, function(a,b) return #a < #b end)
+        return wordList
+    elseif sortMode == "Random" then
+        for i = #wordList, 2, -1 do
+            local j = math.random(i)
+            wordList[i], wordList[j] = wordList[j], wordList[i]
+        end
+        return wordList
+    elseif sortMode == "Smart" then
+        return SmartSort(wordList, currentPrefix, usedWordsSet)
+    end
+    return wordList
+end
+
+-- Function to sort NON-GIVE words (always shortest first)
+local function SortNonGiveWords(wordList, currentPrefix, usedWordsSet)
+    -- Always sort by shortest length for non-give words
+    table.sort(wordList, function(a,b) 
+        if #a ~= #b then
+            return #a < #b
+        end
+        return a < b  -- Alphabetical tiebreaker
+    end)
+    return wordList
+end
 
 local function StrategicSort(wordList, currentPrefix, usedWordsSet)
     local giveWordsLookup = GiveWordsLookup
@@ -463,46 +494,49 @@ local function StrategicSort(wordList, currentPrefix, usedWordsSet)
         return result
     end
     
-    -- Group and shuffle each category
-    local shuffledGiveWords = groupByLengthAndShuffle(giveWords)
-    local shuffledNoSuffixWords = groupByLengthAndShuffle(noSuffixWords)
-    
-    -- Handle suffix groups (preserve priority order, but shuffle within same priority/length)
-    local suffixGroupsProcessed = {}
-    local sortedPriorities = {}
-    for priority, _ in pairs(suffixGroups) do
-        table.insert(sortedPriorities, priority)
+    -- For Strategic mode, give words go first but sorted by Smart/Random based on user preference
+    local sortedGiveWords
+    if sortMode == "Strategic" then
+        sortedGiveWords = groupByLengthAndShuffle(giveWords)
+    else
+        -- For Smart/Random modes applied to give words
+        local giveWordsOnly = {}
+        for _, item in ipairs(giveWords) do
+            table.insert(giveWordsOnly, item.word)
+        end
+        local sortedGiveWordsOnly = SortGiveWords(giveWordsOnly, currentPrefix, usedWordsSet)
+        sortedGiveWords = {}
+        for _, word in ipairs(sortedGiveWordsOnly) do
+            table.insert(sortedGiveWords, {word = word, wl = word, len = #word})
+        end
     end
-    table.sort(sortedPriorities)
     
-    for _, priority in ipairs(sortedPriorities) do
-        local group = suffixGroups[priority]
-        suffixGroupsProcessed[priority] = groupByLengthAndShuffle(group)
+    -- Non-give words are always sorted by shortest (ascending length)
+    local nonGiveWords = {}
+    for _, item in ipairs(noSuffixWords) do
+        table.insert(nonGiveWords, item.word)
+    end
+    for _, group in pairs(suffixGroups) do
+        for _, item in ipairs(group) do
+            table.insert(nonGiveWords, item.word)
+        end
     end
     
-    -- Build result in priority order
+    local sortedNonGiveWords = SortNonGiveWords(nonGiveWords, currentPrefix, usedWordsSet)
+    
+    -- Build result: Give words first (sorted by user mode), then shortest non-give words
     local result = {}
     
-    -- 1. Give words (highest priority) - shuffled within length groups
-    for _, item in ipairs(shuffledGiveWords) do
+    -- 1. Give words (sorted by Smart/Random if applicable)
+    for _, item in ipairs(sortedGiveWords) do
         if #result >= MAX_WORDS then break end
         result[#result + 1] = item.word
     end
     
-    -- 2. Suffix groups in priority order - shuffled within length groups
-    for _, priority in ipairs(sortedPriorities) do
-        local group = suffixGroupsProcessed[priority]
-        for _, item in ipairs(group) do
-            if #result >= MAX_WORDS then break end
-            result[#result + 1] = item.word
-        end
+    -- 2. Non-give words (always shortest first)
+    for _, word in ipairs(sortedNonGiveWords) do
         if #result >= MAX_WORDS then break end
-    end
-    
-    -- 3. No-suffix words (lowest priority) - shuffled within length groups
-    for _, item in ipairs(shuffledNoSuffixWords) do
-        if #result >= MAX_WORDS then break end
-        result[#result + 1] = item.word
+        result[#result + 1] = word
     end
     
     return result
@@ -511,12 +545,12 @@ end
 local function SmartSort(wordList, currentPrefix, usedWordsSet)
     local giveWordsLookup = GiveWordsLookup
     
-    -- Separate PRIMARY gives words (from gives.txt)
+    -- Separate GIVE words (from gives.txt) from NON-GIVE words
     local giveWords = {}
-    local mediumGiveWords = {}  -- 6-9 letter gives words (PRIORITY)
-    local shortGiveWords = {}    -- 1-5 letter gives words
-    local longGiveWords = {}     -- 10+ letter gives words
-    local otherWords = {}
+    local shortGiveWords = {}    -- 1-5 letter give words
+    local mediumGiveWords = {}   -- 6-9 letter give words (PRIORITY)
+    local longGiveWords = {}     -- 10+ letter give words
+    local nonGiveWords = {}      -- All other words
     
     for _, word in ipairs(wordList) do
         local wl = word:lower()
@@ -532,47 +566,73 @@ local function SmartSort(wordList, currentPrefix, usedWordsSet)
                 table.insert(longGiveWords, word)
             end
         else
-            table.insert(otherWords, word)
+            table.insert(nonGiveWords, word)
         end
     end
     
-    -- Shuffle each group randomly
-    local function shuffle(t)
-        for i = #t, 2, -1 do
+    -- Sort GIVE words based on user mode (Smart/Random only)
+    local sortedGiveWords = {}
+    
+    if sortMode == "Smart" or sortMode == "Strategic" then
+        -- Smart mode for give words: medium gives (6-9) first, then short, then long
+        -- Shuffle within groups for randomness but maintain priority groups
+        local function shuffle(t)
+            for i = #t, 2, -1 do
+                local j = math.random(i)
+                t[i], t[j] = t[j], t[i]
+            end
+            return t
+        end
+        
+        -- Apply shuffling within each category for Smart mode
+        shuffle(mediumGiveWords)
+        shuffle(shortGiveWords)
+        shuffle(longGiveWords)
+        
+        -- Build sorted give words: medium first, then short, then long
+        for _, word in ipairs(mediumGiveWords) do
+            table.insert(sortedGiveWords, word)
+        end
+        for _, word in ipairs(shortGiveWords) do
+            table.insert(sortedGiveWords, word)
+        end
+        for _, word in ipairs(longGiveWords) do
+            table.insert(sortedGiveWords, word)
+        end
+        
+    elseif sortMode == "Random" then
+        -- Random mode for give words: completely randomize all give words
+        local allGiveWords = {}
+        for _, word in ipairs(mediumGiveWords) do table.insert(allGiveWords, word) end
+        for _, word in ipairs(shortGiveWords) do table.insert(allGiveWords, word) end
+        for _, word in ipairs(longGiveWords) do table.insert(allGiveWords, word) end
+        
+        for i = #allGiveWords, 2, -1 do
             local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
+            allGiveWords[i], allGiveWords[j] = allGiveWords[j], allGiveWords[i]
         end
-        return t
+        sortedGiveWords = allGiveWords
+        
+    else
+        -- Fallback to shortest for give words if mode is Shortest
+        table.sort(wordList, function(a,b) return #a < #b end)
+        return wordList
     end
     
-    shuffle(mediumGiveWords)
-    shuffle(shortGiveWords)
-    shuffle(longGiveWords)
-    shuffle(otherWords)
+    -- NON-GIVE words always sorted by shortest (ascending length)
+    local sortedNonGiveWords = SortNonGiveWords(nonGiveWords, currentPrefix, usedWordsSet)
     
-    -- Build result: medium gives FIRST, then short gives, then other words, then long gives
+    -- Build final result: Give words first (Smart/Random sorted), then shortest non-give words
     local result = {}
     
-    -- 1. Medium PRIMARY gives (6-9 letters) - TOP PRIORITY
-    for _, word in ipairs(mediumGiveWords) do
+    -- 1. Give words (Smart or Random sorted)
+    for _, word in ipairs(sortedGiveWords) do
         if #result >= 40 then break end
         table.insert(result, word)
     end
     
-    -- 2. Short PRIMARY gives (1-5 letters)
-    for _, word in ipairs(shortGiveWords) do
-        if #result >= 40 then break end
-        table.insert(result, word)
-    end
-    
-    -- 3. All other words (non-give words)
-    for _, word in ipairs(otherWords) do
-        if #result >= 40 then break end
-        table.insert(result, word)
-    end
-    
-    -- 4. Long PRIMARY gives (10+ letters) - lowest priority
-    for _, word in ipairs(longGiveWords) do
+    -- 2. Non-give words (always shortest first)
+    for _, word in ipairs(sortedNonGiveWords) do
         if #result >= 40 then break end
         table.insert(result, word)
     end
@@ -2141,39 +2201,21 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- Sort PRIMARY remaining by mode
+    -- PRIMARY words (gives) get Smart/Random mode sorting
     local sortedPrimary = {}
-    if sortMode == "Strategic" then
-        sortedPrimary = StrategicSort(primaryRemaining, searchPrefix, UsedWords)
-    elseif sortMode == "Shortest" then
-        table.sort(primaryRemaining, function(a,b) return #a < #b end)
-        sortedPrimary = primaryRemaining
-    elseif sortMode == "Random" then
-        for i = #primaryRemaining, 2, -1 do
-            local j = math.random(i)
-            primaryRemaining[i], primaryRemaining[j] = primaryRemaining[j], primaryRemaining[i]
+    if #primaryRemaining > 0 then
+        if sortMode == "Shortest" then
+            -- Even in shortest mode, give words still appear first (just sorted by length)
+            table.sort(primaryRemaining, function(a,b) return #a < #b end)
+            sortedPrimary = primaryRemaining
+        else
+            -- Smart, Random, or Strategic modes for give words
+            sortedPrimary = SortGiveWords(primaryRemaining, searchPrefix, UsedWords)
         end
-        sortedPrimary = primaryRemaining
-    elseif sortMode == "Smart" then
-        sortedPrimary = SmartSort(primaryRemaining, searchPrefix, UsedWords)
     end
     
-    -- Sort FALLBACK remaining by mode
-    local sortedFallback = {}
-    if sortMode == "Strategic" then
-        sortedFallback = StrategicSort(fallbackRemaining, searchPrefix, UsedWords)
-    elseif sortMode == "Shortest" then
-        table.sort(fallbackRemaining, function(a,b) return #a < #b end)
-        sortedFallback = fallbackRemaining
-    elseif sortMode == "Random" then
-        for i = #fallbackRemaining, 2, -1 do
-            local j = math.random(i)
-            fallbackRemaining[i], fallbackRemaining[j] = fallbackRemaining[j], fallbackRemaining[i]
-        end
-        sortedFallback = fallbackRemaining
-    elseif sortMode == "Smart" then
-        sortedFallback = SmartSort(fallbackRemaining, searchPrefix, UsedWords)
-    end
+    -- FALLBACK words (non-gives) always sorted by shortest (ascending length)
+    local sortedFallback = SortNonGiveWords(fallbackRemaining, searchPrefix, UsedWords)
     
     -- Build final result (limit to 40)
     local result = {}
@@ -2420,6 +2462,16 @@ runConn = RunService.Heartbeat:Connect(function()
             elseif frame.Parent:IsA("GuiObject") then
                 isVisible = frame.Parent.Visible
             end
+            typeLbl = frame:FindFirstChild("Type")
+            if typeLbl then
+                typeVisible = typeLbl.Visible
+                if typeVisible and not lastTypeVisible then
+                    UsedWords = {}
+                    StatusText.Text = "New Round - Words Reset"
+                    StatusText.TextColor3 = THEME.Success
+                end
+                lastTypeVisible = typeVisible
+            end
         end
 
         local seconds = nil
@@ -2448,15 +2500,6 @@ runConn = RunService.Heartbeat:Connect(function()
             lastWordCheck = now
         end
         local detected, censored = cachedDetected, cachedCensored
-
-        local typeLbl = frame and frame:FindFirstChild("Type")
-        local typeVisible = typeLbl and typeLbl.Visible
-        if typeVisible and not lastTypeVisible then
-            UsedWords = {}
-            StatusText.Text = "New Round - Words Reset"
-            StatusText.TextColor3 = THEME.Success
-        end
-        lastTypeVisible = typeVisible
 
         if lastManualInput ~= "" and (detected == "" or #detected < #lastManualInput) then
             UsedWords[lastManualInput] = tick()
@@ -2557,4 +2600,4 @@ inputConn = UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == TOGGLE_KEY then ScreenGui.Enabled = not ScreenGui.Enabled end
 end)
 
-ShowToast("Yoshi loaded! PRIMARY: gives.txt | FALLBACK: lastletter.txt", "success")
+ShowToast("Yoshi loaded! GIVES sorted by mode | Others = shortest first", "success")
