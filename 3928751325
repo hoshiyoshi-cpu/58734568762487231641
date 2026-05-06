@@ -855,6 +855,16 @@ SearchBox.PlaceholderText = "Search words..."
 SearchBox.PlaceholderColor3 = THEME.SubText
 SearchBox.Text = ""
 SearchBox.TextXAlignment = Enum.TextXAlignment.Left
+SearchBox.ClearTextOnFocus = false
+
+SearchBox.Focused:Connect(function()
+    task.wait()
+    pcall(function()
+        SearchBox:CaptureFocus()
+        SearchBox:ReleaseFocus()
+        SearchBox:CaptureFocus()
+    end)
+end)
 
 SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
     if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
