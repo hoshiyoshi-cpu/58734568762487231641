@@ -2,7 +2,7 @@
     YOSHI - Word Helper with Discord Bot Strategy
     PRIMARY: gives.txt (curated word list) - ALWAYS FIRST
     FALLBACK: lastletter.txt (dictionary) - ONLY AFTER GIVES
-    SUFFIX PRIORITY: Always shows 1 word per priority at the very top
+    SUFFIX PRIORITY: 1 word per suffix at the very top (after gives)
 --]]
 
 local HttpService = game:GetService("HttpService")
@@ -120,9 +120,9 @@ local fileName = "yinglish.txt"
 local givesFileName = "gives_cached.txt"
 
 -- Separate storage for PRIMARY and FALLBACK words
-local PrimaryWords = {}
-local FallbackWords = {}
-local AllWords = {}
+local PrimaryWords = {}  -- Words from gives.txt (HIGHEST PRIORITY)
+local FallbackWords = {} -- Words from lastletter.txt (FALLBACK)
+local AllWords = {}      -- Combined for buckets
 local SeenWords = {}
 
 -- Temporary Loading UI
@@ -364,64 +364,55 @@ end
 SeenWords = nil
 
 -- =============================================
--- SUFFIX PRIORITY HELPER - FINDS 1 WORD PER SUFFIX
+-- SORTERS (FROM ORIGINAL CODE)
 -- =============================================
 
--- Gets the best word for each suffix priority (finds 1 word per suffix)
-local function GetPrioritySuffixWords(wordList, suffixList, suffixPriority)
-    if #suffixList == 0 then return {}, {} end
-    
-    local priorityWords = {}  -- words to put at top (1 per suffix)
-    local usedWords = {}       -- track which words we used
-    local remainingWords = {}  -- all other words
-    
-    -- For each suffix in priority order, find the best matching word
-    for _, suffix in ipairs(suffixList) do
-        local foundWord = nil
-        
-        -- Search through word list for a word ending with this suffix
-        for _, w in ipairs(wordList) do
-            if #w >= #suffix and w:sub(-#suffix) == suffix then
-                if not usedWords[w] then
-                    foundWord = w
-                    usedWords[w] = true
-                    break
-                end
-            end
-        end
-        
-        if foundWord then
-            table.insert(priorityWords, foundWord)
-        end
-    end
-    
-    -- Collect remaining words (not used in priority)
-    for _, w in ipairs(wordList) do
-        if not usedWords[w] then
-            table.insert(remainingWords, w)
-        end
-    end
-    
-    return priorityWords, remainingWords
-end
-
--- =============================================
--- SORTERS
--- =============================================
-
--- Strategic Sort: GIVE words first, then suffix priority words, then others
-local function StrategicSort(giveWords, fallbackWords, currentPrefix, usedWordsSet)
+local function StrategicSort(wordList, currentPrefix, usedWordsSet)
+    local giveWordsLookup = GiveWordsLookup
+    local SHORT_THRESHOLD = 5
     local MAX_WORDS = 40
+    
     local suffixList = Config.SuffixModes or {}
     local suffixPriority = {}
     for idx, s in ipairs(suffixList) do
         suffixPriority[s] = idx
     end
     
-    -- Get priority suffix words from fallback (1 per suffix)
-    local priorityFallbackWords, remainingFallback = GetPrioritySuffixWords(fallbackWords, suffixList, suffixPriority)
+    local suffixGroups = {}
+    local noSuffixWords = {}
+    local giveWords = {}
     
-    -- Shuffle functions
+    for i = 1, #wordList do
+        local word = wordList[i]
+        local wl = word:lower()
+        
+        if giveWordsLookup[wl] then
+            table.insert(giveWords, {word = word, wl = wl, len = #wl})
+        else
+            local matchedSuffix = nil
+            local matchedPriority = 999
+            
+            for _, s in ipairs(suffixList) do
+                if #wl >= #s and wl:sub(-#s) == s then
+                    local p = suffixPriority[s] or 999
+                    if p < matchedPriority then
+                        matchedPriority = p
+                        matchedSuffix = s
+                    end
+                end
+            end
+            
+            if matchedSuffix then
+                if not suffixGroups[matchedPriority] then
+                    suffixGroups[matchedPriority] = {}
+                end
+                table.insert(suffixGroups[matchedPriority], {word = word, wl = wl, len = #wl})
+            else
+                table.insert(noSuffixWords, {word = word, wl = wl, len = #wl})
+            end
+        end
+    end
+    
     local function shuffle(t)
         for i = #t, 2, -1 do
             local j = math.random(i)
@@ -430,58 +421,99 @@ local function StrategicSort(giveWords, fallbackWords, currentPrefix, usedWordsS
         return t
     end
     
-    -- Shuffle give words
-    local shuffledGiveWords = shuffle(giveWords)
+    local function groupByLengthAndShuffle(words)
+        local lengthGroups = {}
+        local orderTracker = {}
+        
+        for _, item in ipairs(words) do
+            local len = item.len
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+                table.insert(orderTracker, len)
+            end
+            table.insert(lengthGroups[len], item)
+        end
+        
+        table.sort(orderTracker)
+        
+        for len, group in pairs(lengthGroups) do
+            lengthGroups[len] = shuffle(group)
+        end
+        
+        local result = {}
+        for _, len in ipairs(orderTracker) do
+            for _, item in ipairs(lengthGroups[len]) do
+                table.insert(result, item)
+            end
+        end
+        return result
+    end
     
-    -- Build result: GIVE WORDS FIRST, then SUFFIX PRIORITY WORDS, then remaining
+    local shuffledGiveWords = groupByLengthAndShuffle(giveWords)
+    local shuffledNoSuffixWords = groupByLengthAndShuffle(noSuffixWords)
+    
+    local suffixGroupsProcessed = {}
+    local sortedPriorities = {}
+    for priority, _ in pairs(suffixGroups) do
+        table.insert(sortedPriorities, priority)
+    end
+    table.sort(sortedPriorities)
+    
+    for _, priority in ipairs(sortedPriorities) do
+        local group = suffixGroups[priority]
+        suffixGroupsProcessed[priority] = groupByLengthAndShuffle(group)
+    end
+    
     local result = {}
     
-    for _, word in ipairs(shuffledGiveWords) do
+    for _, item in ipairs(shuffledGiveWords) do
         if #result >= MAX_WORDS then break end
-        result[#result + 1] = word
+        result[#result + 1] = item.word
     end
     
-    for _, word in ipairs(priorityFallbackWords) do
+    for _, priority in ipairs(sortedPriorities) do
+        local group = suffixGroupsProcessed[priority]
+        for _, item in ipairs(group) do
+            if #result >= MAX_WORDS then break end
+            result[#result + 1] = item.word
+        end
         if #result >= MAX_WORDS then break end
-        result[#result + 1] = word
     end
     
-    for _, word in ipairs(remainingFallback) do
+    for _, item in ipairs(shuffledNoSuffixWords) do
         if #result >= MAX_WORDS then break end
-        result[#result + 1] = word
+        result[#result + 1] = item.word
     end
     
     return result
 end
 
--- Smart Sort: GIVE words (medium priority), then suffix priority, then others
-local function SmartSort(giveWords, fallbackWords, currentPrefix, usedWordsSet)
-    local suffixList = Config.SuffixModes or {}
-    local suffixPriority = {}
-    for idx, s in ipairs(suffixList) do
-        suffixPriority[s] = idx
-    end
+local function SmartSort(wordList, currentPrefix, usedWordsSet)
+    local giveWordsLookup = GiveWordsLookup
     
-    -- Separate give words by length
+    local giveWords = {}
     local mediumGiveWords = {}
     local shortGiveWords = {}
     local longGiveWords = {}
+    local otherWords = {}
     
-    for _, word in ipairs(giveWords) do
-        local len = #word
-        if len >= 6 and len <= 9 then
-            table.insert(mediumGiveWords, word)
-        elseif len <= 5 then
-            table.insert(shortGiveWords, word)
+    for _, word in ipairs(wordList) do
+        local wl = word:lower()
+        local len = #wl
+        
+        if giveWordsLookup[wl] then
+            if len >= 6 and len <= 9 then
+                table.insert(mediumGiveWords, word)
+            elseif len <= 5 then
+                table.insert(shortGiveWords, word)
+            else
+                table.insert(longGiveWords, word)
+            end
         else
-            table.insert(longGiveWords, word)
+            table.insert(otherWords, word)
         end
     end
     
-    -- Get priority suffix words from fallback (1 per suffix)
-    local priorityFallbackWords, remainingFallback = GetPrioritySuffixWords(fallbackWords, suffixList, suffixPriority)
-    
-    -- Shuffle functions
     local function shuffle(t)
         for i = #t, 2, -1 do
             local j = math.random(i)
@@ -493,32 +525,26 @@ local function SmartSort(giveWords, fallbackWords, currentPrefix, usedWordsSet)
     shuffle(mediumGiveWords)
     shuffle(shortGiveWords)
     shuffle(longGiveWords)
+    shuffle(otherWords)
     
-    -- Build result
     local result = {}
     
-    -- Give words in Smart order
     for _, word in ipairs(mediumGiveWords) do
         if #result >= 40 then break end
         table.insert(result, word)
     end
+    
     for _, word in ipairs(shortGiveWords) do
         if #result >= 40 then break end
         table.insert(result, word)
     end
+    
+    for _, word in ipairs(otherWords) do
+        if #result >= 40 then break end
+        table.insert(result, word)
+    end
+    
     for _, word in ipairs(longGiveWords) do
-        if #result >= 40 then break end
-        table.insert(result, word)
-    end
-    
-    -- Suffix priority words
-    for _, word in ipairs(priorityFallbackWords) do
-        if #result >= 40 then break end
-        table.insert(result, word)
-    end
-    
-    -- Remaining fallback
-    for _, word in ipairs(remainingFallback) do
         if #result >= 40 then break end
         table.insert(result, word)
     end
@@ -527,7 +553,7 @@ local function SmartSort(giveWords, fallbackWords, currentPrefix, usedWordsSet)
 end
 
 -- =============================================
--- UI SETUP (simplified - keeping working parts)
+-- UI SETUP (keeping all original UI code)
 -- =============================================
 
 local function Tween(obj, props, time)
@@ -819,6 +845,7 @@ local UIListLayout = Instance.new("UIListLayout", ScrollList)
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 UIListLayout.Padding = UDim.new(0, 4)
 
+-- SETTINGS PANEL
 local SettingsFrame = Instance.new("Frame", MainFrame)
 SettingsFrame.BackgroundColor3 = THEME.ItemBG
 SettingsFrame.BorderSizePixel = 0
@@ -912,7 +939,6 @@ ResetUsedBtn.MouseButton1Click:Connect(function()
     forceUpdateList = true
     StatusText.Text = "Used Words Reset"
     StatusText.TextColor3 = THEME.Success
-    ShowToast("Used words reset!", "success")
 end)
 
 local WordBrowserBtn = Instance.new("TextButton", TogglesFrame)
@@ -956,7 +982,7 @@ ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 65)
 Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
 -- =============================================
--- USED WORDS FRAME (keep existing working code)
+-- USED WORDS FRAME (keeping original)
 -- =============================================
 
 local UsedWordsFrame = Instance.new("Frame", ScreenGui)
@@ -1192,12 +1218,23 @@ ViewUsedBtn.MouseButton1Click:Connect(function()
     UsedWordsFrame.Parent = nil
     UsedWordsFrame.Parent = ScreenGui
     if UsedWordsFrame.Visible then 
+        lastUsedWordsRefresh = 0
         RefreshUsedWords() 
     end
 end)
 
+local lastUsedWordsRefresh = 0
+local usedWordsHeartbeat = RunService.Heartbeat:Connect(function()
+    if UsedWordsFrame and UsedWordsFrame.Visible then
+        if tick() - lastUsedWordsRefresh > 0.5 then
+            lastUsedWordsRefresh = tick()
+            RefreshUsedWords()
+        end
+    end
+end)
+
 -- =============================================
--- CUSTOM WORDS FRAME (keep existing working code)
+-- CUSTOM WORDS FRAME (keeping original)
 -- =============================================
 
 local CustomWordsFrame = Instance.new("Frame", ScreenGui)
@@ -1236,7 +1273,6 @@ ManageWordsBtn.MouseButton1Click:Connect(function()
     CustomWordsFrame.Visible = not CustomWordsFrame.Visible
     CustomWordsFrame.Parent = nil
     CustomWordsFrame.Parent = ScreenGui
-    RefreshCustomWords()
 end)
 
 local function SetupPhantomBox(box, placeholder)
@@ -1372,7 +1408,7 @@ end)
 RefreshCustomWords()
 
 -- =============================================
--- SERVER BROWSER (keep existing working code)
+-- SERVER BROWSER (keeping original)
 -- =============================================
 
 local ServerFrame = Instance.new("Frame", ScreenGui)
@@ -1527,7 +1563,7 @@ ServerBrowserBtn.MouseButton1Click:Connect(function()
 end)
 
 -- =============================================
--- WORD BROWSER
+-- WORD BROWSER (keeping original)
 -- =============================================
 
 do
@@ -1799,10 +1835,6 @@ do
         WordBrowserFrame.Visible = not WordBrowserFrame.Visible
         WordBrowserFrame.Parent = nil
         WordBrowserFrame.Parent = ScreenGui
-        if WordBrowserFrame.Visible then
-            WBEndBox.Text = Config.SuffixMode or ""
-            WBLengthBox.Text = Config.LengthMode ~= 0 and tostring(Config.LengthMode) or ""
-        end
     end)
 end
 
@@ -1825,14 +1857,26 @@ local function GetMatchLength(str, prefix)
     return len
 end
 
+local function CheckSuffix(w)
+    if suffixMode == "" then return true end
+    local suffixList = Config.SuffixModes
+    if suffixList and #suffixList > 1 then
+        for _, s in ipairs(suffixList) do
+            if #w >= #s and w:sub(-#s) == s then return true end
+        end
+        return false
+    end
+    return #w >= #suffixMode and w:sub(-#suffixMode) == suffixMode
+end
+
 -- =============================================
--- MAIN WINDOW UPDATE LIST - WITH SUFFIX PRIORITY FOR ALL MODES
+-- MAIN WINDOW UPDATE LIST (MODIFIED FOR GIVE WORDS PRIORITY)
 -- =============================================
 
 local lastRequiredLetter = ""
 
 UpdateList = function(detectedText, requiredLetter)
-    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode) .. "|" .. sortMode
+    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode)
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
 
@@ -1863,7 +1907,7 @@ UpdateList = function(detectedText, requiredLetter)
 
     local prefixLen = #searchPrefix
     
-    -- COLLECT GIVE WORDS (PRIMARY - from gives.txt)
+    -- COLLECT GIVE WORDS FIRST (from PrimaryBuckets)
     local giveWords = {}
     local giveBucket = firstChar and PrimaryBuckets[firstChar] or PrimaryWords
     if giveBucket then
@@ -1879,7 +1923,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- COLLECT FALLBACK WORDS (from lastletter.txt)
+    -- COLLECT FALLBACK WORDS (from FallbackBuckets)
     local fallbackWords = {}
     local fallbackBucket = firstChar and FallbackBuckets[firstChar] or FallbackWords
     if fallbackBucket then
@@ -1895,196 +1939,88 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- Partial matching if no matches
+    -- If no matches, try partial matching (backtracking)
     if #giveWords == 0 and #fallbackWords == 0 then
         local maxPartialLen = 0
-        local partialGiveMatches = {}
-        local partialFallbackMatches = {}
-        
-        if giveBucket then
-            for _, w in ipairs(giveBucket) do
-                if not Blacklist[w] and not UsedWords[w] then
-                    if lengthMode == 0 or #w == lengthMode then
-                        local mLen = GetMatchLength(w, searchPrefix)
-                        if mLen > maxPartialLen then
-                            maxPartialLen = mLen
-                            partialGiveMatches = {w}
-                            partialFallbackMatches = {}
-                        elseif mLen == maxPartialLen and mLen > 0 then
-                            table.insert(partialGiveMatches, w)
-                        end
+        local partialMatches = {}
+        for _, w in ipairs(bucket) do
+            if not Blacklist[w] and not UsedWords[w] then
+                if lengthMode == 0 or #w == lengthMode then
+                    local mLen = GetMatchLength(w, searchPrefix)
+                    if mLen > maxPartialLen then
+                        maxPartialLen = mLen
+                        partialMatches = {w}
+                    elseif mLen == maxPartialLen and mLen > 0 then
+                        table.insert(partialMatches, w)
                     end
                 end
             end
         end
-        
-        if #partialGiveMatches == 0 and fallbackBucket then
-            for _, w in ipairs(fallbackBucket) do
-                if not Blacklist[w] and not UsedWords[w] then
-                    if lengthMode == 0 or #w == lengthMode then
-                        local mLen = GetMatchLength(w, searchPrefix)
-                        if mLen > maxPartialLen then
-                            maxPartialLen = mLen
-                            partialFallbackMatches = {w}
-                        elseif mLen == maxPartialLen and mLen > 0 then
-                            table.insert(partialFallbackMatches, w)
-                        end
-                    end
+        if #partialMatches > 0 then
+            for _, w in ipairs(partialMatches) do
+                if primarySet[w] then
+                    table.insert(giveWords, w)
+                else
+                    table.insert(fallbackWords, w)
                 end
             end
-        end
-        
-        if #partialGiveMatches > 0 or #partialFallbackMatches > 0 then
-            giveWords = partialGiveMatches
-            fallbackWords = partialFallbackMatches
             searchPrefix = searchPrefix:sub(1, maxPartialLen)
             isBacktracked = true
         end
     end
     
-    local suffixList = Config.SuffixModes or {}
-    local suffixPriority = {}
-    for idx, s in ipairs(suffixList) do
-        suffixPriority[s] = idx
-    end
-    
-    -- Helper to get 1 word per suffix priority from a word list
-    local function GetPriorityWords(wordList)
-        if #suffixList == 0 then return {}, wordList end
-        
-        local priorityWords = {}
-        local usedWords = {}
-        
-        for _, suffix in ipairs(suffixList) do
-            for _, w in ipairs(wordList) do
-                if #w >= #suffix and w:sub(-#suffix) == suffix then
-                    if not usedWords[w] then
-                        priorityWords[#priorityWords + 1] = w
-                        usedWords[w] = true
-                        break
-                    end
-                end
-            end
-        end
-        
-        local remaining = {}
-        for _, w in ipairs(wordList) do
-            if not usedWords[w] then
-                remaining[#remaining + 1] = w
-            end
-        end
-        
-        return priorityWords, remaining
-    end
-    
-    -- Helper to shuffle
-    local function shuffle(t)
-        for i = #t, 2, -1 do
-            local j = math.random(i)
-            t[i], t[j] = t[j], t[i]
-        end
-        return t
-    end
-    
-    -- Apply sorting based on selected mode
-    local matches = {}
-    
+    -- Sort GIVE words by selected mode
+    local sortedGive = {}
     if sortMode == "Strategic" then
-        -- Get priority words from fallback (1 per suffix)
-        local priorityFallback, remainingFallback = GetPriorityWords(fallbackWords)
-        
-        -- Shuffle give words
-        local shuffledGive = shuffle(giveWords)
-        
-        -- Build: GIVE words, then PRIORITY suffix words, then remaining
-        for _, w in ipairs(shuffledGive) do matches[#matches + 1] = w end
-        for _, w in ipairs(priorityFallback) do matches[#matches + 1] = w end
-        for _, w in ipairs(remainingFallback) do matches[#matches + 1] = w end
-        
-    elseif sortMode == "Smart" then
-        -- Separate give words by length
-        local mediumGive = {}
-        local shortGive = {}
-        local longGive = {}
-        for _, w in ipairs(giveWords) do
-            local len = #w
-            if len >= 6 and len <= 9 then
-                table.insert(mediumGive, w)
-            elseif len <= 5 then
-                table.insert(shortGive, w)
-            else
-                table.insert(longGive, w)
-            end
-        end
-        
-        shuffle(mediumGive)
-        shuffle(shortGive)
-        shuffle(longGive)
-        
-        -- Get priority words from fallback
-        local priorityFallback, remainingFallback = GetPriorityWords(fallbackWords)
-        
-        -- Build: GIVE words (medium, short, long), then PRIORITY suffix, then remaining
-        for _, w in ipairs(mediumGive) do matches[#matches + 1] = w end
-        for _, w in ipairs(shortGive) do matches[#matches + 1] = w end
-        for _, w in ipairs(longGive) do matches[#matches + 1] = w end
-        for _, w in ipairs(priorityFallback) do matches[#matches + 1] = w end
-        for _, w in ipairs(remainingFallback) do matches[#matches + 1] = w end
-        
-    elseif sortMode == "Random" then
-        -- Random: Shuffle everything, but priority suffix words still come first
-        local priorityFallback, remainingFallback = GetPriorityWords(fallbackWords)
-        
-        local shuffledGive = shuffle(giveWords)
-        local shuffledPriority = shuffle(priorityFallback)
-        local shuffledRemaining = shuffle(remainingFallback)
-        
-        for _, w in ipairs(shuffledGive) do matches[#matches + 1] = w end
-        for _, w in ipairs(shuffledPriority) do matches[#matches + 1] = w end
-        for _, w in ipairs(shuffledRemaining) do matches[#matches + 1] = w end
-        
+        sortedGive = StrategicSort(giveWords, searchPrefix, UsedWords)
     elseif sortMode == "Shortest" then
-        -- Shortest: Sort by length, but priority suffix words come first within each length group
-        local priorityFallback, remainingFallback = GetPriorityWords(fallbackWords)
-        
-        -- Sort give words by length
-        table.sort(giveWords, function(a, b) 
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-        
-        -- Sort priority fallback by length
-        table.sort(priorityFallback, function(a, b) 
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-        
-        -- Sort remaining fallback by length
-        table.sort(remainingFallback, function(a, b) 
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-        
-        for _, w in ipairs(giveWords) do matches[#matches + 1] = w end
-        for _, w in ipairs(priorityFallback) do matches[#matches + 1] = w end
-        for _, w in ipairs(remainingFallback) do matches[#matches + 1] = w end
-        
+        table.sort(giveWords, function(a,b) return #a < #b end)
+        sortedGive = giveWords
+    elseif sortMode == "Random" then
+        for i = #giveWords, 2, -1 do
+            local j = math.random(i)
+            giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
+        end
+        sortedGive = giveWords
+    elseif sortMode == "Smart" then
+        sortedGive = SmartSort(giveWords, searchPrefix, UsedWords)
     else
-        -- Default: Give words first, then priority suffix, then remaining
-        local priorityFallback, remainingFallback = GetPriorityWords(fallbackWords)
-        for _, w in ipairs(giveWords) do matches[#matches + 1] = w end
-        for _, w in ipairs(priorityFallback) do matches[#matches + 1] = w end
-        for _, w in ipairs(remainingFallback) do matches[#matches + 1] = w end
+        sortedGive = giveWords
     end
     
-    -- Limit to 40 words
-    local limitedMatches = {}
-    for i = 1, math.min(40, #matches) do
-        table.insert(limitedMatches, matches[i])
+    -- Sort FALLBACK words by selected mode
+    local sortedFallback = {}
+    if sortMode == "Strategic" then
+        sortedFallback = StrategicSort(fallbackWords, searchPrefix, UsedWords)
+    elseif sortMode == "Shortest" then
+        table.sort(fallbackWords, function(a,b) return #a < #b end)
+        sortedFallback = fallbackWords
+    elseif sortMode == "Random" then
+        for i = #fallbackWords, 2, -1 do
+            local j = math.random(i)
+            fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
+        end
+        sortedFallback = fallbackWords
+    elseif sortMode == "Smart" then
+        sortedFallback = SmartSort(fallbackWords, searchPrefix, UsedWords)
+    else
+        sortedFallback = fallbackWords
     end
-    matches = limitedMatches
+    
+    -- Build final result: GIVE WORDS FIRST, then FALLBACK
+    local matches = {}
+    for _, w in ipairs(sortedGive) do
+        if #matches < 40 then
+            table.insert(matches, w)
+        end
+    end
+    for _, w in ipairs(sortedFallback) do
+        if #matches < 40 then
+            table.insert(matches, w)
+        end
+    end
 
-    -- Display the results (limit to 15 visible buttons)
+    -- Display the results
     local displayList = {}
     for i = 1, math.min(15, #matches) do
         table.insert(displayList, matches[i])
@@ -2233,7 +2169,7 @@ UpdateList = function(detectedText, requiredLetter)
 end
 
 -- =============================================
--- MINIMIZE, STATS, HEARTBEAT
+-- MINIMIZE
 -- =============================================
 
 MinBtn.MouseButton1Click:Connect(function()
@@ -2253,6 +2189,10 @@ MinBtn.MouseButton1Click:Connect(function()
         MinBtn.Text = "-"
     end
 end)
+
+-- =============================================
+-- STATS OVERLAY
+-- =============================================
 
 local StatsData = {}
 do
@@ -2290,6 +2230,10 @@ do
     sc.Parent = sf
     StatsData.Count = sc
 end
+
+-- =============================================
+-- MAIN HEARTBEAT LOOP
+-- =============================================
 
 local lastTypeVisible = false
 local cachedDetected = ""
@@ -2447,4 +2391,4 @@ inputConn = UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == TOGGLE_KEY then ScreenGui.Enabled = not ScreenGui.Enabled end
 end)
 
-ShowToast("Yoshi loaded! Suffix priority words ALWAYS appear at the top (1 per priority)!", "success")
+ShowToast("Yoshi loaded! PRIMARY: gives.txt | FALLBACK: lastletter.txt | GIVE words always first!", "success")
