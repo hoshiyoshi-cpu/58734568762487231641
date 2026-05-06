@@ -1892,8 +1892,7 @@ local function GetMatchLength(str, prefix)
 end
 
 -- =============================================
--- MAIN WINDOW UPDATE LIST - SUFFIX PRIORITY FIRST
--- GIVES follow Smart/Random | FALLBACK always Shortest for those modes
+-- MAIN WINDOW UPDATE LIST - OPTIMIZED FOR PERFORMANCE
 -- =============================================
 
 local lastRequiredLetter = ""
@@ -1930,20 +1929,21 @@ UpdateList = function(detectedText, requiredLetter)
 
     local prefixLen = #searchPrefix
     
-    -- Get suffix list for priority matching
+    -- Get suffix list
     local suffixList = Config.SuffixModes or {}
     local suffixPriority = {}
     for idx, s in ipairs(suffixList) do
         suffixPriority[s] = idx
     end
     
-    -- COLLECT ALL MATCHING WORDS (both give and fallback together for suffix priority)
+    -- COLLECT ALL MATCHING WORDS (LIMITED for performance)
     local allMatchingWords = {}
     local bucket = firstChar and Buckets[firstChar] or AllWords
+    local MAX_WORD_SCAN = 250  -- Reduced for performance
     
     if bucket then
         for _, w in ipairs(bucket) do
-            if #allMatchingWords >= 500 then break end
+            if #allMatchingWords >= MAX_WORD_SCAN then break end
             if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
                 if lengthMode == 0 or #w == lengthMode then
                     if not Blacklist[w] and not UsedWords[w] then
@@ -1954,11 +1954,15 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- If no matches, try partial matching
+    -- Quick return if no words
     if #allMatchingWords == 0 then
+        -- Try partial matching (minimal effort)
         local maxPartialLen = 0
         local partialMatches = {}
+        local scanCount = 0
         for _, w in ipairs(bucket) do
+            scanCount = scanCount + 1
+            if scanCount > 500 then break end
             if not Blacklist[w] and not UsedWords[w] then
                 if lengthMode == 0 or #w == lengthMode then
                     local mLen = GetMatchLength(w, searchPrefix)
@@ -1978,7 +1982,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- STEP 1: Get suffix priority words (1 per suffix) from ALL matching words
+    -- STEP 1: Get suffix priority words (optimized)
     local priorityWords, remainingWords = GetPrioritySuffixWords(allMatchingWords, suffixList, suffixPriority)
     
     -- STEP 2: Separate remaining words into GIVE and FALLBACK
@@ -1993,81 +1997,68 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- STEP 3: Sort GIVE words by selected mode
+    -- STEP 3: Sort GIVE words
     local sortedGive = {}
     if sortMode == "Strategic" then
         sortedGive = StrategicSort(giveWords, searchPrefix, UsedWords)
     elseif sortMode == "Smart" then
-        -- Smart mode for GIVE words only
         sortedGive = SmartSort(giveWords, searchPrefix, UsedWords)
     elseif sortMode == "Random" then
-        -- Random mode for GIVE words only
         for i = #giveWords, 2, -1 do
             local j = math.random(i)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    elseif sortMode == "Shortest" then
-        table.sort(giveWords, function(a,b) return #a < #b end)
-        sortedGive = giveWords
     else
+        table.sort(giveWords, function(a,b) return #a < #b end)
         sortedGive = giveWords
     end
     
-    -- STEP 4: Sort FALLBACK words - ALWAYS SHORTEST for Random and Smart modes
+    -- STEP 4: Sort FALLBACK words (OPTIMIZED - shortest only for Smart/Random)
     local sortedFallback = {}
     if sortMode == "Strategic" then
         sortedFallback = StrategicSort(fallbackWords, searchPrefix, UsedWords)
-    elseif sortMode == "Smart" then
-        -- Smart mode: FALLBACK = SHORTEST only
-        table.sort(fallbackWords, function(a,b) 
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-        sortedFallback = fallbackWords
-    elseif sortMode == "Random" then
-        -- Random mode: FALLBACK = SHORTEST only
-        table.sort(fallbackWords, function(a,b) 
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-        sortedFallback = fallbackWords
-    elseif sortMode == "Shortest" then
-        -- Shortest mode: both give and fallback are shortest
-        table.sort(fallbackWords, function(a,b) 
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-        sortedFallback = fallbackWords
+    elseif sortMode == "Smart" or sortMode == "Random" then
+        -- Optimized shortest sort (group by length)
+        if #fallbackWords > 50 then
+            local byLength = {}
+            local maxLen = 0
+            for _, w in ipairs(fallbackWords) do
+                local len = #w
+                if len > maxLen then maxLen = len end
+                byLength[len] = byLength[len] or {}
+                table.insert(byLength[len], w)
+            end
+            for len = 1, maxLen do
+                if byLength[len] then
+                    table.sort(byLength[len])
+                    for _, w in ipairs(byLength[len]) do
+                        table.insert(sortedFallback, w)
+                    end
+                end
+            end
+        else
+            table.sort(fallbackWords, function(a,b) 
+                if #a ~= #b then return #a < #b end
+                return a < b
+            end)
+            sortedFallback = fallbackWords
+        end
     else
+        table.sort(fallbackWords, function(a,b) 
+            if #a ~= #b then return #a < #b end
+            return a < b
+        end)
         sortedFallback = fallbackWords
     end
     
-    -- STEP 5: Build final result - SUFFIX PRIORITY FIRST, then GIVE, then FALLBACK
+    -- STEP 5: Build final result (limit to 40)
     local matches = {}
-    
-    -- 1. Suffix priority words (1 per suffix) - ALWAYS FIRST
-    for _, w in ipairs(priorityWords) do
-        if #matches < 40 then
-            table.insert(matches, w)
-        end
-    end
-    
-    -- 2. Give words (sorted by selected mode)
-    for _, w in ipairs(sortedGive) do
-        if #matches < 40 then
-            table.insert(matches, w)
-        end
-    end
-    
-    -- 3. Fallback words (sorted by mode rules)
-    for _, w in ipairs(sortedFallback) do
-        if #matches < 40 then
-            table.insert(matches, w)
-        end
-    end
+    for _, w in ipairs(priorityWords) do if #matches < 40 then table.insert(matches, w) end end
+    for _, w in ipairs(sortedGive) do if #matches < 40 then table.insert(matches, w) end end
+    for _, w in ipairs(sortedFallback) do if #matches < 40 then table.insert(matches, w) end end
 
-    -- Display the results
+    -- Display results
     local displayList = {}
     for i = 1, math.min(15, #matches) do
         table.insert(displayList, matches[i])
@@ -2085,7 +2076,7 @@ UpdateList = function(detectedText, requiredLetter)
         StatusText.TextColor3 = THEME.SubText
     end
 
-    -- Update buttons (same as before)
+    -- Update buttons (existing code)
     local giveWordsLookupLocal = GiveWordsLookup
     
     for i = 1, math.max(#displayList, #ButtonCache) do
