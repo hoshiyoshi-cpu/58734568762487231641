@@ -38,7 +38,7 @@ local THEME = {
     Slider = Color3.fromRGB(15, 87, 82)
 }
 
-local function ColorToRGB(c)
+ ColorToRGB(c)
     return string.format("%d,%d,%d", math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
 end
 
@@ -52,13 +52,13 @@ local Config = {
     GiveWords = {},
 }
 
-local function SaveConfig()
+ SaveConfig()
     if writefile then
         writefile(ConfigFile, HttpService:JSONEncode(Config))
     end
 end
 
-local function LoadConfig()
+ LoadConfig()
     if isfile and isfile(ConfigFile) then
         local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(ConfigFile)) end)
         if success and decoded then
@@ -163,7 +163,7 @@ LoadingStatus.TextSize = 14
 
 local lastCacheCleanup = tick()
 
-local function UpdateStatus(text, color)
+ UpdateStatus(text, color)
     LoadingStatus.Text = text
     if color then LoadingStatus.TextColor3 = color end
     game:GetService("RunService").RenderStepped:Wait()
@@ -174,7 +174,7 @@ end
 -- =============================================
 
 local GiveWordsLookup = {}
-local function RefreshGiveWordsLookup()
+ RefreshGiveWordsLookup()
     local lookup = {}
     for i = 1, #PrimaryWords do
         lookup[PrimaryWords[i]] = true
@@ -183,7 +183,7 @@ local function RefreshGiveWordsLookup()
 end
 
 local TrapPrefixesLookup = {}
-local function RefreshTrapLookup()
+ RefreshTrapLookup()
     local lookup = {}
     if Config.TrapPrefixes then
         for i = 1, #Config.TrapPrefixes do
@@ -368,22 +368,53 @@ SeenWords = nil
 -- =============================================
 
 -- Function to get 1 word per suffix priority from a word list
+-- Prefers: give words > shorter words > fallback words
 local function GetPrioritySuffixWords(wordList, suffixList, suffixPriority)
     if #suffixList == 0 then return {}, wordList end
     
     local priorityWords = {}
     local usedWords = {}
     
-    -- For each suffix in priority order, find the best matching word
+    -- For each suffix in priority order, find the BEST matching word
+    -- Best = give word preferred, then shortest, then alphabetical
     for _, suffix in ipairs(suffixList) do
+        local bestWord = nil
+        local bestIsGive = false
+        local bestLen = math.huge
+
         for _, w in ipairs(wordList) do
-            if #w >= #suffix and w:sub(-#suffix) == suffix then
-                if not usedWords[w] then
-                    table.insert(priorityWords, w)
-                    usedWords[w] = true
-                    break
+            if #w >= #suffix and w:sub(-#suffix) == suffix and not usedWords[w] then
+                local isGive = GiveWordsLookup[w] == true
+                local wLen = #w
+
+                local isBetter = false
+                if bestWord == nil then
+                    isBetter = true
+                elseif isGive and not bestIsGive then
+                    -- Give word always beats fallback word
+                    isBetter = true
+                elseif not isGive and bestIsGive then
+                    -- Fallback never beats give word
+                    isBetter = false
+                elseif wLen < bestLen then
+                    -- Same tier, prefer shorter
+                    isBetter = true
+                elseif wLen == bestLen and w < bestWord then
+                    -- Same length, prefer alphabetically earlier
+                    isBetter = true
+                end
+
+                if isBetter then
+                    bestWord = w
+                    bestIsGive = isGive
+                    bestLen = wLen
                 end
             end
+        end
+
+        if bestWord then
+            table.insert(priorityWords, bestWord)
+            usedWords[bestWord] = true
         end
     end
     
