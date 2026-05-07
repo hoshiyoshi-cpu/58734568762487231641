@@ -1786,6 +1786,7 @@ UpdateList = function(detectedText, requiredLetter)
     
     if sortMode == "Smart" then
         -- Smart mode: Prioritize 6-9 letter words, then short, then long
+        -- BUT shuffle within each group for variety
         local mediumGive = {}  -- 6-9 letters
         local shortGive = {}   -- 1-5 letters
         local longGive = {}    -- 10+ letters
@@ -1801,10 +1802,19 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        -- Sort each group by length (shortest first)
-        table.sort(mediumGive, function(a,b) return #a < #b end)
-        table.sort(shortGive, function(a,b) return #a < #b end)
-        table.sort(longGive, function(a,b) return #a < #b end)
+        -- Shuffle each group
+        for i = #mediumGive, 2, -1 do
+            local j = math.random(i)
+            mediumGive[i], mediumGive[j] = mediumGive[j], mediumGive[i]
+        end
+        for i = #shortGive, 2, -1 do
+            local j = math.random(i)
+            shortGive[i], shortGive[j] = shortGive[j], shortGive[i]
+        end
+        for i = #longGive, 2, -1 do
+            local j = math.random(i)
+            longGive[i], longGive[j] = longGive[j], longGive[i]
+        end
         
         -- Add in priority order: medium first, then short, then long
         for _, w in ipairs(mediumGive) do table.insert(sortedGive, w) end
@@ -1812,7 +1822,7 @@ UpdateList = function(detectedText, requiredLetter)
         for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
         
     elseif sortMode == "Random" then
-        -- Random mode: Shuffle give words EVERY TIME
+        -- Random mode: Completely shuffle give words EVERY TIME
         local shuffledGive = {}
         for _, w in ipairs(giveWords) do
             table.insert(shuffledGive, w)
@@ -1835,6 +1845,18 @@ UpdateList = function(detectedText, requiredLetter)
     
     if sortMode == "Random" then
         -- Random mode: Shuffle fallback words EVERY TIME
+        local shuffledFallback = {}
+        for _, w in ipairs(fallbackWords) do
+            table.insert(shuffledFallback, w)
+        end
+        -- Fisher-Yates shuffle
+        for i = #shuffledFallback, 2, -1 do
+            local j = math.random(i)
+            shuffledFallback[i], shuffledFallback[j] = shuffledFallback[j], shuffledFallback[i]
+        end
+        sortedFallback = shuffledFallback
+    elseif sortMode == "Smart" then
+        -- Smart mode: Shuffle fallback words as well for variety
         local shuffledFallback = {}
         for _, w in ipairs(fallbackWords) do
             table.insert(shuffledFallback, w)
@@ -1893,7 +1915,7 @@ UpdateList = function(detectedText, requiredLetter)
         if sortMode == "Random" then
             StatusText.Text = "Found " .. #matches .. " words (Randomized!)"
         elseif sortMode == "Smart" then
-            StatusText.Text = "Found " .. #matches .. " words (Smart: 6-9 letters first)"
+            StatusText.Text = "Found " .. #matches .. " words (Smart: 6-9 letters first, shuffled)"
         else
             StatusText.Text = "Found " .. #matches .. " words | #1: " .. matches[1]
         end
