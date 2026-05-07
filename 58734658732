@@ -1735,12 +1735,24 @@ UpdateList = function(detectedText, requiredLetter)
     end
     
     -- ========== STEP 1: Find absolute shortest word (any source) ==========
+    -- ========== STEP 1: Find absolute shortest word (any source) - EXCLUDING PREFIX ITSELF ==========
     local shortestWord = nil
     local shortestLen = math.huge
     for _, w in ipairs(allMatchingWords) do
-        if #w < shortestLen then
+        -- Skip if word is EXACTLY the prefix (e.g., "ra" when prefix is "ra")
+        if #w < shortestLen and w ~= searchPrefix then
             shortestLen = #w
             shortestWord = w
+        end
+    end
+
+    -- If no word found after excluding prefix, then allow prefix as fallback
+    if not shortestWord then
+        for _, w in ipairs(allMatchingWords) do
+            if #w < shortestLen then
+                shortestLen = #w
+                shortestWord = w
+            end
         end
     end
     
