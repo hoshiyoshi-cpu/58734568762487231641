@@ -1745,31 +1745,24 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 2: Find suffix priority words (ONLY need first letter, not full prefix!) ==========
+    -- ========== STEP 2: Find suffix priority words (must match prefix AND end with suffix) ==========
     local suffixWords = {}
     local usedInPriority = {}
     if shortestWord then usedInPriority[shortestWord] = true end
-    
-    -- Get all words that start with the required first letter (for suffix priority)
-    local firstLetterBucket = requiredFirstLetter and Buckets[requiredFirstLetter] or AllWords
-    
+
     for _, suffix in ipairs(suffixList) do
         local bestSuffixWord = nil
         local bestSuffixLen = math.huge
         
-        if firstLetterBucket then
-            for _, w in ipairs(firstLetterBucket) do
-                -- Check length requirement
-                if lengthMode == 0 or #w == lengthMode then
-                    -- Check not blacklisted/used
-                    if not Blacklist[w] and not UsedWords[w] and not usedInPriority[w] then
-                        -- Check if word ends with suffix
-                        if #w >= #suffix and w:sub(-#suffix) == suffix then
-                            if #w < bestSuffixLen then
-                                bestSuffixLen = #w
-                                bestSuffixWord = w
-                            end
-                        end
+        -- Search through prefix-matching words (already filtered by typed prefix)
+        for _, w in ipairs(prefixMatchingWords) do
+            -- Check not already used in priority
+            if not usedInPriority[w] then
+                -- Check if word ends with suffix
+                if #w >= #suffix and w:sub(-#suffix) == suffix then
+                    if #w < bestSuffixLen then
+                        bestSuffixLen = #w
+                        bestSuffixWord = w
                     end
                 end
             end
