@@ -1928,18 +1928,19 @@ UpdateList = function(detectedText, requiredLetter)
     end
 
     local prefixLen = #searchPrefix
-
+    
+    -- Get suffix list
     local suffixList = Config.SuffixModes or {}
     local suffixPriority = {}
     for idx, s in ipairs(suffixList) do
         suffixPriority[s] = idx
     end
-
-    -- COLLECT ALL MATCHING WORDS
+    
+    -- COLLECT ALL MATCHING WORDS (LIMITED for performance)
     local allMatchingWords = {}
     local bucket = firstChar and Buckets[firstChar] or AllWords
     local MAX_WORD_SCAN = 250
-
+    
     if bucket then
         for _, w in ipairs(bucket) do
             if #allMatchingWords >= MAX_WORD_SCAN then break end
@@ -1952,26 +1953,37 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
     end
-
-    -- EARLY EXIT: no exact prefix matches, try partial fallback
+    
+    -- EARLY EXIT: If no words match the prefix, stop immediately
     if #allMatchingWords == 0 then
+        -- Clear the display
+        for _, btn in ipairs(ButtonCache) do
+            btn.Visible = false
+        end
+        ButtonData = {}
+        StatusText.Text = "No words start with '" .. searchPrefix .. "'"
+        StatusText.TextColor3 = Color3.fromRGB(255, 100, 100)
+        Tween(StatusDot, {BackgroundColor3 = Color3.fromRGB(255, 100, 100)})
+        return
+    end
+    
+    -- Quick return if no words (partial matching fallback)
+    if #allMatchingWords == 0 then
+        -- Try partial matching (minimal effort)
         local maxPartialLen = 0
         local partialMatches = {}
         local scanCount = 0
-        local scanBucket = firstChar and Buckets[firstChar] or AllWords
-        if scanBucket then
-            for _, w in ipairs(scanBucket) do
-                scanCount = scanCount + 1
-                if scanCount > 500 then break end
-                if not Blacklist[w] and not UsedWords[w] then
-                    if lengthMode == 0 or #w == lengthMode then
-                        local mLen = GetMatchLength(w, searchPrefix)
-                        if mLen > maxPartialLen then
-                            maxPartialLen = mLen
-                            partialMatches = {w}
-                        elseif mLen == maxPartialLen and mLen > 0 then
-                            table.insert(partialMatches, w)
-                        end
+        for _, w in ipairs(bucket) do
+            scanCount = scanCount + 1
+            if scanCount > 500 then break end
+            if not Blacklist[w] and not UsedWords[w] then
+                if lengthMode == 0 or #w == lengthMode then
+                    local mLen = GetMatchLength(w, searchPrefix)
+                    if mLen > maxPartialLen then
+                        maxPartialLen = mLen
+                        partialMatches = {w}
+                    elseif mLen == maxPartialLen and mLen > 0 then
+                        table.insert(partialMatches, w)
                     end
                 end
             end
@@ -1981,72 +1993,95 @@ UpdateList = function(detectedText, requiredLetter)
             searchPrefix = searchPrefix:sub(1, maxPartialLen)
             isBacktracked = true
         else
-            for _, btn in ipairs(ButtonCache) do btn.Visible = false end
+            -- Still no matches, clear display and exit
+            for _, btn in ipairs(ButtonCache) do
+                btn.Visible = false
+            end
             ButtonData = {}
-            StatusText.Text = "No words start with '" .. searchPrefix .. "'"
+            StatusText.Text = "No matches found"
             StatusText.TextColor3 = Color3.fromRGB(255, 100, 100)
             Tween(StatusDot, {BackgroundColor3 = Color3.fromRGB(255, 100, 100)})
             return
         end
     end
-
-    -- STEP 1: Pull out 1 best word per suffix — give words preferred, then shortest
+    
+    -- STEP 1: Get suffix priority words
     local priorityWords, remainingWords = GetPrioritySuffixWords(allMatchingWords, suffixList, suffixPriority)
-
-    -- STEP 2: Sort remaining words — give words bubble up naturally within each sort mode
-    local sortedRemaining = {}
-
-    if sortMode == "Strategic" or sortMode == "Smart" then
-        local giveRemaining = {}
-        local otherRemaining = {}
-        for _, w in ipairs(remainingWords) do
-            if GiveWordsLookup[w] then
-                table.insert(giveRemaining, w)
-            else
-                table.insert(otherRemaining, w)
-            end
+    
+    -- STEP 2: Separate remaining words into GIVE and FALLBACK
+    local giveWords = {}
+    local fallbackWords = {}
+    
+    for _, w in ipairs(remainingWords) do
+        if GiveWordsLookup[w] then
+            table.insert(giveWords, w)
+        else
+            table.insert(fallbackWords, w)
         end
-
-        -- Sort give words by length then alphabetically
-        table.sort(giveRemaining, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-
-        -- Sort fallback words by length then alphabetically
-        table.sort(otherRemaining, function(a, b)
-            if #a ~= #b then return #a < #b end
-            return a < b
-        end)
-
-        for _, w in ipairs(giveRemaining) do table.insert(sortedRemaining, w) end
-        for _, w in ipairs(otherRemaining) do table.insert(sortedRemaining, w) end
-
+    end
+    
+    -- STEP 3: Sort GIVE words
+    local sortedGive = {}
+    if sortMode == "Strategic" then
+        sortedGive = StrategicSort(giveWords, searchPrefix, UsedWords)
+    elseif sortMode == "Smart" then
+        sortedGive = SmartSort(giveWords, searchPrefix, UsedWords)
     elseif sortMode == "Random" then
-        sortedRemaining = remainingWords
-        for i = #sortedRemaining, 2, -1 do
+        for i = #giveWords, 2, -1 do
             local j = math.random(i)
-            sortedRemaining[i], sortedRemaining[j] = sortedRemaining[j], sortedRemaining[i]
+            giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
-
-    else -- Shortest
-        table.sort(remainingWords, function(a, b)
+        sortedGive = giveWords
+    else
+        table.sort(giveWords, function(a,b) return #a < #b end)
+        sortedGive = giveWords
+    end
+    
+    -- STEP 4: Sort FALLBACK words (shortest for Smart/Random modes)
+    local sortedFallback = {}
+    if sortMode == "Strategic" then
+        sortedFallback = StrategicSort(fallbackWords, searchPrefix, UsedWords)
+    elseif sortMode == "Smart" or sortMode == "Random" then
+        -- Fast shortest sort - group by length
+        if #fallbackWords > 30 then
+            local byLength = {}
+            local maxLen = 0
+            for _, w in ipairs(fallbackWords) do
+                local len = #w
+                if len > maxLen then maxLen = len end
+                byLength[len] = byLength[len] or {}
+                table.insert(byLength[len], w)
+            end
+            for len = 1, maxLen do
+                if byLength[len] then
+                    table.sort(byLength[len])
+                    for _, w in ipairs(byLength[len]) do
+                        table.insert(sortedFallback, w)
+                    end
+                end
+            end
+        else
+            table.sort(fallbackWords, function(a,b) 
+                if #a ~= #b then return #a < #b end
+                return a < b
+            end)
+            sortedFallback = fallbackWords
+        end
+    else
+        table.sort(fallbackWords, function(a,b) 
             if #a ~= #b then return #a < #b end
             return a < b
         end)
-        sortedRemaining = remainingWords
+        sortedFallback = fallbackWords
     end
-
-    -- STEP 3: Build final list — suffix priority words ALWAYS first
+    
+    -- STEP 5: Build final result (limit to 40)
     local matches = {}
-    for _, w in ipairs(priorityWords) do
-        if #matches < 40 then table.insert(matches, w) end
-    end
-    for _, w in ipairs(sortedRemaining) do
-        if #matches < 40 then table.insert(matches, w) end
-    end
+    for _, w in ipairs(priorityWords) do if #matches < 40 then table.insert(matches, w) end end
+    for _, w in ipairs(sortedGive) do if #matches < 40 then table.insert(matches, w) end end
+    for _, w in ipairs(sortedFallback) do if #matches < 40 then table.insert(matches, w) end end
 
-    -- Display results (top 15 shown as buttons)
+    -- Display results
     local displayList = {}
     for i = 1, math.min(15, #matches) do
         table.insert(displayList, matches[i])
@@ -2058,6 +2093,7 @@ UpdateList = function(detectedText, requiredLetter)
         currentBestMatch = nil
     end
 
+    -- Reset status color on successful match
     if isBacktracked then
         local accentRGB = ColorToRGB(THEME.Accent)
         StatusText.Text = "No match: <font color=\"rgb(" .. accentRGB .. ")\">" .. searchPrefix .. "</font>"
@@ -2071,7 +2107,7 @@ UpdateList = function(detectedText, requiredLetter)
 
     -- Update buttons
     local giveWordsLookupLocal = GiveWordsLookup
-
+    
     for i = 1, math.max(#displayList, #ButtonCache) do
         local w = displayList[i]
         local btn = ButtonCache[i]
@@ -2132,7 +2168,7 @@ UpdateList = function(detectedText, requiredLetter)
                 btn.Parent = ScrollList
                 btn.BackgroundColor3 = THEME.ItemBG
                 if lbl then lbl.TextColor3 = THEME.Text end
-
+                
                 local existingIndicator = btn:FindFirstChild("GiveIndicator")
                 if giveWordsLookupLocal and giveWordsLookupLocal[w] then
                     if not existingIndicator then
@@ -2157,10 +2193,18 @@ UpdateList = function(detectedText, requiredLetter)
             ButtonData[btn] = {word = w, detected = detectedText}
 
             local accentRGB = ColorToRGB(THEME.Accent)
-            if i == 1 then
+            if sortMode == "Strategic" then
+                if i == 1 then 
+                    accentRGB = "100,255,140"
+                elseif i == 2 then 
+                    accentRGB = "255,200,100"
+                elseif i == 3 then 
+                    accentRGB = "100,200,255"
+                end
+            elseif i == 1 then
                 accentRGB = "100,255,140"
             elseif i == 2 then
-                accentRGB = "255,200,100"
+                accentRGB = "255,180,200"
             elseif i == 3 then
                 accentRGB = "100,200,255"
             end
@@ -2188,7 +2232,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
 
-    ScrollList.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y)
+    ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
 end
 
 -- =============================================
