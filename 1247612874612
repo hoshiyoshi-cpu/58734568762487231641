@@ -1783,8 +1783,9 @@ UpdateList = function(detectedText, requiredLetter)
     
     -- ========== STEP 4: Sort GIVE words based on mode ==========
     local sortedGive = {}
-    if sortMode == "Smart" or sortMode == "Random" then
-        -- Prioritize 6-9 letter words
+    
+    if sortMode == "Smart" then
+        -- Smart mode: Prioritize 6-9 letter words, then short, then long
         local mediumGive = {}  -- 6-9 letters
         local shortGive = {}   -- 1-5 letters
         local longGive = {}    -- 10+ letters
@@ -1805,18 +1806,40 @@ UpdateList = function(detectedText, requiredLetter)
         table.sort(shortGive, function(a,b) return #a < #b end)
         table.sort(longGive, function(a,b) return #a < #b end)
         
-        -- Add in priority order
+        -- Add in priority order: medium first, then short, then long
         for _, w in ipairs(mediumGive) do table.insert(sortedGive, w) end
         for _, w in ipairs(shortGive) do table.insert(sortedGive, w) end
         for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
+        
+    elseif sortMode == "Random" then
+        -- Random mode: Completely randomize give words
+        for i = #giveWords, 2, -1 do
+            local j = math.random(i)
+            giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
+        end
+        sortedGive = giveWords
+        
     else
-        -- Shortest or Strategic mode: just sort by length
+        -- Strategic/Shortest mode: just sort by length (shortest first)
         table.sort(giveWords, function(a,b) return #a < #b end)
         sortedGive = giveWords
     end
     
-    -- ========== STEP 5: Sort FALLBACK words ==========
-    table.sort(fallbackWords, function(a,b) return #a < #b end)
+    -- ========== STEP 5: Sort FALLBACK words based on mode ==========
+    local sortedFallback = {}
+    
+    if sortMode == "Random" then
+        -- Random mode: Randomize fallback words
+        for i = #fallbackWords, 2, -1 do
+            local j = math.random(i)
+            fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
+        end
+        sortedFallback = fallbackWords
+    else
+        -- All other modes: sort by length (shortest first)
+        table.sort(fallbackWords, function(a,b) return #a < #b end)
+        sortedFallback = fallbackWords
+    end
     
     -- ========== STEP 6: Build final result in order ==========
     local matches = {}
@@ -1843,7 +1866,7 @@ UpdateList = function(detectedText, requiredLetter)
     end
     
     -- #6: Fallback words
-    for _, w in ipairs(fallbackWords) do
+    for _, w in ipairs(sortedFallback) do
         if #matches >= 40 then break end
         table.insert(matches, w)
     end
