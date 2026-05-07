@@ -1812,12 +1812,17 @@ UpdateList = function(detectedText, requiredLetter)
         for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
         
     elseif sortMode == "Random" then
-        -- Random mode: Completely randomize give words
-        for i = #giveWords, 2, -1 do
-            local j = math.random(i)
-            giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
+        -- Random mode: Shuffle give words EVERY TIME
+        local shuffledGive = {}
+        for _, w in ipairs(giveWords) do
+            table.insert(shuffledGive, w)
         end
-        sortedGive = giveWords
+        -- Fisher-Yates shuffle
+        for i = #shuffledGive, 2, -1 do
+            local j = math.random(i)
+            shuffledGive[i], shuffledGive[j] = shuffledGive[j], shuffledGive[i]
+        end
+        sortedGive = shuffledGive
         
     else
         -- Strategic/Shortest mode: just sort by length (shortest first)
@@ -1829,12 +1834,17 @@ UpdateList = function(detectedText, requiredLetter)
     local sortedFallback = {}
     
     if sortMode == "Random" then
-        -- Random mode: Randomize fallback words
-        for i = #fallbackWords, 2, -1 do
-            local j = math.random(i)
-            fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
+        -- Random mode: Shuffle fallback words EVERY TIME
+        local shuffledFallback = {}
+        for _, w in ipairs(fallbackWords) do
+            table.insert(shuffledFallback, w)
         end
-        sortedFallback = fallbackWords
+        -- Fisher-Yates shuffle
+        for i = #shuffledFallback, 2, -1 do
+            local j = math.random(i)
+            shuffledFallback[i], shuffledFallback[j] = shuffledFallback[j], shuffledFallback[i]
+        end
+        sortedFallback = shuffledFallback
     else
         -- All other modes: sort by length (shortest first)
         table.sort(fallbackWords, function(a,b) return #a < #b end)
@@ -1880,7 +1890,13 @@ UpdateList = function(detectedText, requiredLetter)
     -- Update status
     if #matches > 0 then
         currentBestMatch = matches[1]
-        StatusText.Text = "Found " .. #matches .. " words | #1: " .. matches[1]
+        if sortMode == "Random" then
+            StatusText.Text = "Found " .. #matches .. " words (Randomized!)"
+        elseif sortMode == "Smart" then
+            StatusText.Text = "Found " .. #matches .. " words (Smart: 6-9 letters first)"
+        else
+            StatusText.Text = "Found " .. #matches .. " words | #1: " .. matches[1]
+        end
         StatusText.TextColor3 = THEME.Success
         Tween(StatusDot, {BackgroundColor3 = THEME.Success})
     end
