@@ -1504,19 +1504,17 @@ do
 
         local priorityResults = {}  -- priority level -> list of words
         local MAX_RESULTS = 200
+        local totalScanned = 0
         
         local function addWordToResults(w, priority)
             if not priorityResults[priority] then
                 priorityResults[priority] = {}
             end
             -- Check for duplicates within same priority
-            local duplicate = false
             for _, existing in ipairs(priorityResults[priority]) do
-                if existing == w then duplicate = true; break end
+                if existing == w then return end
             end
-            if not duplicate then
-                table.insert(priorityResults[priority], w)
-            end
+            table.insert(priorityResults[priority], w)
         end
         
         local function getWordPriority(w)
@@ -1536,29 +1534,31 @@ do
             return (lVal == nil or lVal == 0) or (#w == lVal)
         end
         
-        -- ========== SEARCH BOTH PRIMARY AND FALLBACK WORDS TOGETHER ==========
-        -- Combine both word lists for searching
-        local allSearchWords = {}
-        
-        -- Add Primary words (gives.txt)
-        for _, w in ipairs(PrimaryWords) do
-            if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
-                table.insert(allSearchWords, {word = w, source = "primary"})
-            end
-        end
-        
-        -- Add Fallback words (lastletter.txt)
-        for _, w in ipairs(FallbackWords) do
-            if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
-                table.insert(allSearchWords, {word = w, source = "fallback"})
-            end
-        end
-        
-        -- If no suffixes specified, just show all words (alphabetical)
+        -- If no suffixes specified, just show all words from Primary (gives.txt) first, then Fallback
         if #Config.SuffixModes == 0 then
             local simpleResults = {}
-            for _, item in ipairs(allSearchWords) do
-                table.insert(simpleResults, item.word)
+            -- Add primary words first
+            for _, w in ipairs(PrimaryWords) do
+                if #simpleResults >= MAX_RESULTS then break end
+                if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                    table.insert(simpleResults, w)
+                end
+            end
+            -- Add fallback words if we need more
+            if #simpleResults < MAX_RESULTS then
+                for _, w in ipairs(FallbackWords) do
+                    if #simpleResults >= MAX_RESULTS then break end
+                    if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                        -- Check for duplicate
+                        local dup = false
+                        for _, existing in ipairs(simpleResults) do
+                            if existing == w then dup = true; break end
+                        end
+                        if not dup then
+                            table.insert(simpleResults, w)
+                        end
+                    end
+                end
             end
             table.sort(simpleResults)
             
@@ -1602,16 +1602,29 @@ do
             return
         end
         
-        -- With suffixes: categorize by priority
-        for _, item in ipairs(allSearchWords) do
-            local w = item.word
-            local priority = getWordPriority(w)
-            if priority < 999 then  -- Word matches at least one suffix
-                addWordToResults(w, priority)
+        -- With suffixes: search Primary words first
+        for _, w in ipairs(PrimaryWords) do
+            if totalScanned >= MAX_RESULTS * 2 then break end
+            if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                local priority = getWordPriority(w)
+                if priority < 999 then
+                    addWordToResults(w, priority)
+                    totalScanned = totalScanned + 1
+                end
             end
         end
         
-        -- Also add words that don't match any suffix? No, only show suffix-matching words when suffixes are specified
+        -- Then search Fallback words
+        for _, w in ipairs(FallbackWords) do
+            if totalScanned >= MAX_RESULTS * 2 then break end
+            if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                local priority = getWordPriority(w)
+                if priority < 999 then
+                    addWordToResults(w, priority)
+                    totalScanned = totalScanned + 1
+                end
+            end
+        end
         
         -- Sort results by priority FIRST, then by length within each priority
         local sortedResults = {}
@@ -1639,6 +1652,10 @@ do
         
         -- Display results
         local displayLimit = math.min(200, #sortedResults)
+        if displayLimit == 0 then
+            ShowToast("No words found ending with: " .. eVal, "warning")
+        end
+        
         for i = 1, displayLimit do
             local w = sortedResults[i]
             local row = Instance.new("TextButton", WBList)
