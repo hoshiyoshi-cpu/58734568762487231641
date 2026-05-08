@@ -1767,61 +1767,37 @@ UpdateList = function(detectedText, requiredLetter)
     if (not firstChar or firstChar == "") and requiredLetter then
         firstChar = requiredLetter:sub(1,1):lower()
     end
-    
-    local requiredFirstLetter = requiredLetter and requiredLetter:sub(1,1):lower() or firstChar
+
     local prefixLen = #searchPrefix
     local suffixList = Config.SuffixModes or {}
     
-    -- ========== EARLY EXIT: Check if any words exist with this first letter ==========
-    local bucket = firstChar and Buckets[firstChar]
-    if not bucket or #bucket == 0 then
-        -- No words with this first letter at all
-        for _, btn in ipairs(ButtonCache) do btn.Visible = false end
-        ButtonData = {}
-        StatusText.Text = "No words start with '" .. searchPrefix .. "'"
-        StatusText.TextColor3 = Color3.fromRGB(255, 100, 100)
-        Tween(StatusDot, {BackgroundColor3 = Color3.fromRGB(255, 100, 100)})
-        return
-    end
+    -- ========== COLLECT ALL PREFIX MATCHING WORDS (NO LIMIT) ==========
+    local prefixMatchingWords = {}
+    local bucket = firstChar and Buckets[firstChar] or AllWords
     
-    -- ========== QUICK PREFIX CHECK: Count how many words actually match the prefix ==========
-    local prefixMatchCount = 0
-    local exactPrefixMatches = {}
-    
-    -- Only scan until we find enough matches (max 100 for suffix search, stop early if none)
-    for _, w in ipairs(bucket) do
-        if #w >= prefixLen and w:sub(1, prefixLen) == searchPrefix then
-            if not Blacklist[w] and not UsedWords[w] then
+    if bucket then
+        for _, w in ipairs(bucket) do
+            if prefixLen == 0 or w:sub(1, prefixLen) == searchPrefix then
                 if lengthMode == 0 or #w == lengthMode then
-                    prefixMatchCount = prefixMatchCount + 1
-                    table.insert(exactPrefixMatches, w)
-                    if prefixMatchCount >= 100 then break end -- Enough for suffix search
+                    if not Blacklist[w] and not UsedWords[w] then
+                        table.insert(prefixMatchingWords, w)
+                    end
                 end
             end
         end
     end
     
-    -- ========== EARLY EXIT: No words match the current prefix ==========
-    if prefixMatchCount == 0 then
-        for _, btn in ipairs(ButtonCache) do btn.Visible = false end
-        ButtonData = {}
-        StatusText.Text = "No words start with '" .. searchPrefix .. "'"
-        StatusText.TextColor3 = Color3.fromRGB(255, 100, 100)
-        Tween(StatusDot, {BackgroundColor3 = Color3.fromRGB(255, 100, 100)})
-        return
-    end
-    
-    -- ========== STEP 1: Find shortest word (from exact prefix matches) ==========
+    -- ========== STEP 1: Find shortest word (from prefix matches) ==========
     local shortestWord = nil
     local shortestLen = math.huge
-    for _, w in ipairs(exactPrefixMatches) do
+    for _, w in ipairs(prefixMatchingWords) do
         if #w < shortestLen and w ~= searchPrefix then
             shortestLen = #w
             shortestWord = w
         end
     end
     if not shortestWord then
-        for _, w in ipairs(exactPrefixMatches) do
+        for _, w in ipairs(prefixMatchingWords) do
             if #w < shortestLen then
                 shortestLen = #w
                 shortestWord = w
@@ -1829,99 +1805,133 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 2: Find suffix priority words (using exact prefix matches only) ==========
+    -- ========== STEP 2: Find suffix priority words (must start with prefix AND end with suffix) ==========
     local suffixWords = {}
     local usedInPriority = {}
     if shortestWord then usedInPriority[shortestWord] = true end
-    
-    -- EARLY EXIT: If no suffix list, skip this step
-    if #suffixList > 0 then
-        for _, suffix in ipairs(suffixList) do
-            local bestSuffixWord = nil
-            local bestLen = math.huge
-            
-            -- Search through exact prefix matches (already filtered, small list)
-            for _, w in ipairs(exactPrefixMatches) do
-                if not usedInPriority[w] then
-                    if #w >= #suffix and w:sub(-#suffix) == suffix then
-                        if #w < bestLen then
-                            bestLen = #w
-                            bestSuffixWord = w
-                        end
+
+    for _, suffix in ipairs(suffixList) do
+        local bestSuffixWord = nil
+        local shortestLen = math.huge
+        
+        -- Search through ALL prefix matching words (no limit)
+        for _, w in ipairs(prefixMatchingWords) do
+            if not usedInPriority[w] then
+                if #w >= #suffix and w:sub(-#suffix) == suffix then
+                    if #w < shortestLen then
+                        shortestLen = #w
+                        bestSuffixWord = w
                     end
                 end
             end
-            
-            if bestSuffixWord then
-                table.insert(suffixWords, bestSuffixWord)
-                usedInPriority[bestSuffixWord] = true
-            end
+        end
+        
+        if bestSuffixWord then
+            table.insert(suffixWords, bestSuffixWord)
+            usedInPriority[bestSuffixWord] = true
         end
     end
     
-    -- ========== STEP 3 & 4: Collect and sort GIVE/FALLBACK words ==========
-    -- Only collect if we haven't reached 40 matches yet
-    local neededWords = 40 - #suffixWords
+    -- ========== STEP 3: Separate remaining into GIVE and FALLBACK ==========
     local giveWords = {}
     local fallbackWords = {}
     
-    if neededWords > 0 then
-        for _, w in ipairs(exactPrefixMatches) do
-            if not usedInPriority[w] then
-                if GiveWordsLookup[w] then
-                    table.insert(giveWords, w)
-                else
-                    table.insert(fallbackWords, w)
-                end
+    for _, w in ipairs(prefixMatchingWords) do
+        if not usedInPriority[w] then
+            if GiveWordsLookup[w] then
+                table.insert(giveWords, w)
+            else
+                table.insert(fallbackWords, w)
             end
-            -- Early exit if we have enough candidates
-            if #giveWords + #fallbackWords >= neededWords * 2 then break end
         end
     end
     
-    -- Sort GIVE words (only if we have them)
+    -- ========== STEP 4: Sort GIVE words based on mode ==========
     local sortedGive = {}
-    if #giveWords > 0 then
-        if sortMode == "Smart" then
-            local mediumGive, shortGive, longGive = {}, {}, {}
-            for _, w in ipairs(giveWords) do
-                local len = #w
-                if len >= 6 and len <= 9 then table.insert(mediumGive, w)
-                elseif len <= 5 then table.insert(shortGive, w)
-                else table.insert(longGive, w) end
+    
+    if sortMode == "Smart" then
+        local mediumGive = {}  -- 6-9 letters
+        local shortGive = {}   -- 1-5 letters
+        local longGive = {}    -- 10+ letters
+        
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if len >= 6 and len <= 9 then
+                table.insert(mediumGive, w)
+            elseif len <= 5 then
+                table.insert(shortGive, w)
+            else
+                table.insert(longGive, w)
             end
-            for i = #mediumGive, 2, -1 do local j = math.random(i) mediumGive[i], mediumGive[j] = mediumGive[j], mediumGive[i] end
-            for i = #shortGive, 2, -1 do local j = math.random(i) shortGive[i], shortGive[j] = shortGive[j], shortGive[i] end
-            for i = #longGive, 2, -1 do local j = math.random(i) longGive[i], longGive[j] = longGive[j], longGive[i] end
-            for _, w in ipairs(mediumGive) do table.insert(sortedGive, w) end
-            for _, w in ipairs(shortGive) do table.insert(sortedGive, w) end
-            for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
-        elseif sortMode == "Random" then
-            for i = #giveWords, 2, -1 do local j = math.random(i) giveWords[i], giveWords[j] = giveWords[j], giveWords[i] end
-            sortedGive = giveWords
-        else
-            table.sort(giveWords, function(a,b) return #a < #b end)
-            sortedGive = giveWords
         end
+        
+        for i = #mediumGive, 2, -1 do local j = math.random(i) mediumGive[i], mediumGive[j] = mediumGive[j], mediumGive[i] end
+        for i = #shortGive, 2, -1 do local j = math.random(i) shortGive[i], shortGive[j] = shortGive[j], shortGive[i] end
+        for i = #longGive, 2, -1 do local j = math.random(i) longGive[i], longGive[j] = longGive[j], longGive[i] end
+        
+        for _, w in ipairs(mediumGive) do table.insert(sortedGive, w) end
+        for _, w in ipairs(shortGive) do table.insert(sortedGive, w) end
+        for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
+        
+    elseif sortMode == "Random" then
+        for i = #giveWords, 2, -1 do
+            local j = math.random(i)
+            giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
+        end
+        sortedGive = giveWords
+    else
+        table.sort(giveWords, function(a,b) return #a < #b end)
+        sortedGive = giveWords
     end
     
-    -- Sort FALLBACK words
+    -- ========== STEP 5: Sort FALLBACK words ==========
     local sortedFallback = {}
-    if #fallbackWords > 0 then
-        if sortMode == "Random" or sortMode == "Smart" then
-            for i = #fallbackWords, 2, -1 do local j = math.random(i) fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i] end
-            sortedFallback = fallbackWords
-        else
-            table.sort(fallbackWords, function(a,b) return #a < #b end)
-            sortedFallback = fallbackWords
+    
+    if sortMode == "Random" then
+        for i = #fallbackWords, 2, -1 do
+            local j = math.random(i)
+            fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
+        end
+        sortedFallback = fallbackWords
+    elseif sortMode == "Smart" then
+        for i = #fallbackWords, 2, -1 do
+            local j = math.random(i)
+            fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
+        end
+        sortedFallback = fallbackWords
+    else
+        table.sort(fallbackWords, function(a,b) return #a < #b end)
+        sortedFallback = fallbackWords
+    end
+    
+    -- ========== STEP 6: Build final result (limit to 40) ==========
+    local matches = {}
+    
+    -- #1: Shortest word overall
+    if shortestWord then table.insert(matches, shortestWord) end
+    
+    -- #2-4: Suffix priority words
+    for _, w in ipairs(suffixWords) do
+        local duplicate = false
+        for _, existing in ipairs(matches) do
+            if existing == w then duplicate = true; break end
+        end
+        if not duplicate then
+            table.insert(matches, w)
         end
     end
     
-    -- ========== Build final result (limit to 40 total) ==========
-    local matches = {}
-    for _, w in ipairs(suffixWords) do if #matches < 40 then table.insert(matches, w) end end
-    for _, w in ipairs(sortedGive) do if #matches < 40 then table.insert(matches, w) end end
-    for _, w in ipairs(sortedFallback) do if #matches < 40 then table.insert(matches, w) end end
+    -- #5: Give words (ALL of them up to 40)
+    for _, w in ipairs(sortedGive) do
+        if #matches >= 40 then break end
+        table.insert(matches, w)
+    end
+    
+    -- #6: Fallback words (ALL of them up to 40)
+    for _, w in ipairs(sortedFallback) do
+        if #matches >= 40 then break end
+        table.insert(matches, w)
+    end
     
     -- Display results (limit to 15 visible buttons)
     local displayList = {}
@@ -1935,12 +1945,9 @@ UpdateList = function(detectedText, requiredLetter)
         StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'"
         StatusText.TextColor3 = THEME.Success
         Tween(StatusDot, {BackgroundColor3 = THEME.Success})
-    else
-        StatusText.Text = "No valid words"
-        StatusText.TextColor3 = THEME.SubText
     end
     
-    -- Update buttons (same as before)
+    -- Update buttons
     local giveWordsLookupLocal = GiveWordsLookup
     
     for i = 1, math.max(#displayList, #ButtonCache) do
