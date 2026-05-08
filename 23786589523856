@@ -1810,24 +1810,45 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 2: Find suffix priority words (must match prefix AND end with suffix) ==========
+    -- ========== STEP 2: Find suffix priority words (partial prefix match, must end with suffix) ==========
     local suffixWords = {}
     local usedInPriority = {}
     if shortestWord then usedInPriority[shortestWord] = true end
 
     for _, suffix in ipairs(suffixList) do
         local bestSuffixWord = nil
-        local bestSuffixLen = math.huge
+        local bestMatchScore = -1  -- Higher score = better match
         
-        -- Search through prefix-matching words (already filtered by typed prefix)
-        for _, w in ipairs(prefixMatchingWords) do
-            -- Check not already used in priority
-            if not usedInPriority[w] then
-                -- Check if word ends with suffix
-                if #w >= #suffix and w:sub(-#suffix) == suffix then
-                    if #w < bestSuffixLen then
-                        bestSuffixLen = #w
-                        bestSuffixWord = w
+        -- Search through ALL words that start with the required first letter
+        local firstLetterBucket = requiredFirstLetter and Buckets[requiredFirstLetter] or AllWords
+        
+        if firstLetterBucket then
+            for _, w in ipairs(firstLetterBucket) do
+                -- Check not already used
+                if not usedInPriority[w] and not Blacklist[w] and not UsedWords[w] then
+                    -- Check length requirement
+                    if lengthMode == 0 or #w == lengthMode then
+                        -- Check if word ends with suffix
+                        if #w >= #suffix and w:sub(-#suffix) == suffix then
+                            -- Calculate match score based on how well it matches the typed prefix
+                            local matchLen = 0
+                            local maxMatch = math.min(#w, #searchPrefix)
+                            for i = 1, maxMatch do
+                                if w:sub(i,i) == searchPrefix:sub(i,i) then
+                                    matchLen = i
+                                else
+                                    break
+                                end
+                            end
+                            
+                            -- Score: longer prefix match = better, shorter word = better for ties
+                            local score = matchLen * 1000 - #w
+                            
+                            if score > bestMatchScore then
+                                bestMatchScore = score
+                                bestSuffixWord = w
+                            end
+                        end
                     end
                 end
             end
