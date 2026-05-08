@@ -1502,18 +1502,21 @@ do
             suffixPriority[s] = idx
         end
 
-        local seenWords = {}
         local priorityResults = {}  -- priority level -> list of words
         local MAX_RESULTS = 200
         
         local function addWordToResults(w, priority)
-            if seenWords[w] then return end
-            seenWords[w] = true
-            
             if not priorityResults[priority] then
                 priorityResults[priority] = {}
             end
-            table.insert(priorityResults[priority], w)
+            -- Check for duplicates within same priority
+            local duplicate = false
+            for _, existing in ipairs(priorityResults[priority]) do
+                if existing == w then duplicate = true; break end
+            end
+            if not duplicate then
+                table.insert(priorityResults[priority], w)
+            end
         end
         
         local function getWordPriority(w)
@@ -1533,49 +1536,82 @@ do
             return (lVal == nil or lVal == 0) or (#w == lVal)
         end
         
-        -- Collect words from Primary words (gives.txt) with proper priority
-        local primaryCount = 0
+        -- ========== SEARCH BOTH PRIMARY AND FALLBACK WORDS TOGETHER ==========
+        -- Combine both word lists for searching
+        local allSearchWords = {}
+        
+        -- Add Primary words (gives.txt)
         for _, w in ipairs(PrimaryWords) do
             if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
-                if #Config.SuffixModes > 0 then
-                    local priority = getWordPriority(w)
-                    if priority < 999 then
-                        addWordToResults(w, priority)
-                        primaryCount = primaryCount + 1
-                        if primaryCount >= MAX_RESULTS then break end
-                    end
-                elseif eVal == "" then
-                    addWordToResults(w, 0)
-                    primaryCount = primaryCount + 1
-                    if primaryCount >= MAX_RESULTS then break end
-                end
+                table.insert(allSearchWords, {word = w, source = "primary"})
             end
         end
         
-        -- If we have suffixes but need more words, also check Fallback words
-        if #Config.SuffixModes > 0 and primaryCount < MAX_RESULTS then
-            for _, w in ipairs(FallbackWords) do
-                if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
-                    local priority = getWordPriority(w)
-                    if priority < 999 then
-                        addWordToResults(w, priority)
-                        primaryCount = primaryCount + 1
-                        if primaryCount >= MAX_RESULTS then break end
-                    end
-                end
+        -- Add Fallback words (lastletter.txt)
+        for _, w in ipairs(FallbackWords) do
+            if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
+                table.insert(allSearchWords, {word = w, source = "fallback"})
             end
         end
         
-        -- If no suffixes, add remaining Fallback words
-        if eVal == "" and primaryCount < MAX_RESULTS then
-            for _, w in ipairs(FallbackWords) do
-                if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
-                    addWordToResults(w, 0)
-                    primaryCount = primaryCount + 1
-                    if primaryCount >= MAX_RESULTS then break end
+        -- If no suffixes specified, just show all words (alphabetical)
+        if #Config.SuffixModes == 0 then
+            local simpleResults = {}
+            for _, item in ipairs(allSearchWords) do
+                table.insert(simpleResults, item.word)
+            end
+            table.sort(simpleResults)
+            
+            local displayLimit = math.min(200, #simpleResults)
+            for i = 1, displayLimit do
+                local w = simpleResults[i]
+                local row = Instance.new("TextButton", WBList)
+                row.Size = UDim2.new(1, -6, 0, 22)
+                row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)
+                row.Text = ""
+                row.AutoButtonColor = false
+                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                row.MouseButton1Click:Connect(function()
+                    Tween(row, {BackgroundColor3 = THEME.Accent}, 0.2)
+                    task.delay(0.2, function()
+                        Tween(row, {BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)}, 0.2)
+                    end)
+                    if SearchBox then
+                        SearchBox.Text = w
+                    end
+                end)
+                local lbl = Instance.new("TextLabel", row)
+                local isPrimary = false
+                for _, pw in ipairs(PrimaryWords) do
+                    if pw == w then isPrimary = true; break end
                 end
+                lbl.Text = w
+                lbl.Font = Enum.Font.Gotham
+                lbl.TextSize = 12
+                lbl.TextColor3 = isPrimary and THEME.Success or THEME.Text
+                lbl.Size = UDim2.new(1, -10, 1, 0)
+                lbl.Position = UDim2.new(0, 5, 0, 0)
+                lbl.BackgroundTransparency = 1
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+            end
+            
+            WBList.CanvasSize = UDim2.new(0,0,0, WBLayout.AbsoluteContentSize.Y)
+            lastDetected = "---"
+            forceUpdateList = true
+            if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
+            return
+        end
+        
+        -- With suffixes: categorize by priority
+        for _, item in ipairs(allSearchWords) do
+            local w = item.word
+            local priority = getWordPriority(w)
+            if priority < 999 then  -- Word matches at least one suffix
+                addWordToResults(w, priority)
             end
         end
+        
+        -- Also add words that don't match any suffix? No, only show suffix-matching words when suffixes are specified
         
         -- Sort results by priority FIRST, then by length within each priority
         local sortedResults = {}
@@ -1600,6 +1636,79 @@ do
             end
             if #sortedResults >= MAX_RESULTS then break end
         end
+        
+        -- Display results
+        local displayLimit = math.min(200, #sortedResults)
+        for i = 1, displayLimit do
+            local w = sortedResults[i]
+            local row = Instance.new("TextButton", WBList)
+            row.Size = UDim2.new(1, -6, 0, 22)
+            row.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)
+            row.Text = ""
+            row.AutoButtonColor = false
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            row.MouseButton1Click:Connect(function()
+                Tween(row, {BackgroundColor3 = THEME.Accent}, 0.2)
+                task.delay(0.2, function()
+                    Tween(row, {BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(25,25,30) or Color3.fromRGB(30,30,35)}, 0.2)
+                end)
+                if SearchBox then
+                    SearchBox.Text = w
+                end
+            end)
+            local lbl = Instance.new("TextLabel", row)
+            local isPrimary = false
+            for _, pw in ipairs(PrimaryWords) do
+                if pw == w then 
+                    isPrimary = true 
+                    break 
+                end
+            end
+            lbl.Text = w
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 12
+            lbl.TextColor3 = isPrimary and THEME.Success or THEME.Text
+            lbl.Size = UDim2.new(1, -10, 1, 0)
+            lbl.Position = UDim2.new(0, 5, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            
+            -- Color code based on which suffix priority it matches
+            local matchedPriority = getWordPriority(w)
+            if matchedPriority < 999 then
+                if matchedPriority == 1 then
+                    lbl.TextColor3 = THEME.Success  -- Green for priority 1
+                elseif matchedPriority == 2 then
+                    lbl.TextColor3 = THEME.Warning  -- Yellow for priority 2
+                elseif matchedPriority == 3 then
+                    lbl.TextColor3 = THEME.Accent   -- Blue for priority 3
+                else
+                    lbl.TextColor3 = Color3.fromRGB(200, 150, 255)  -- Purple for others
+                end
+            end
+        end
+
+        WBList.CanvasSize = UDim2.new(0,0,0, WBLayout.AbsoluteContentSize.Y)
+        lastDetected = "---"
+        forceUpdateList = true
+        
+        if #Config.SuffixModes > 0 then
+            local priorityText = ""
+            for i, s in ipairs(Config.SuffixModes) do
+                if i > 1 then priorityText = priorityText .. ", " end
+                priorityText = priorityText .. s .. " (#" .. i .. ")"
+            end
+            local foundCount = 0
+            for _, group in pairs(priorityResults) do
+                foundCount = foundCount + #group
+            end
+            ShowToast("Suffix Priority: " .. priorityText .. " | Found " .. foundCount .. " words", "success")
+        end
+        
+        if UpdateList then 
+            UpdateList(lastDetected, lastRequiredLetter)
+        end
+    end
         
         -- Display results
         local displayLimit = math.min(200, #sortedResults)
