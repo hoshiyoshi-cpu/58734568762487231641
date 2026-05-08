@@ -1482,6 +1482,7 @@ do
         if eVal == "Ends with..." then eVal = "" end
         eVal = eVal:lower():gsub("[%s%c]+", "")
 
+        -- Parse comma-separated suffixes and maintain order (priority)
         local newSuffixModes = {}
         for part in eVal:gmatch("[^,]+") do
             local clean = part:gsub("[%s%c]+", "")
@@ -1495,13 +1496,14 @@ do
         Config.LengthMode = lVal or 0
         SaveConfig()
         
+        -- Build priority map (lower index = higher priority)
         local suffixPriority = {}
         for idx, s in ipairs(Config.SuffixModes) do
             suffixPriority[s] = idx
         end
 
         local seenWords = {}
-        local priorityResults = {}
+        local priorityResults = {}  -- priority level -> list of words
         local MAX_RESULTS = 200
         
         local function addWordToResults(w, priority)
@@ -1531,12 +1533,12 @@ do
             return (lVal == nil or lVal == 0) or (#w == lVal)
         end
         
+        -- Collect words from Primary words (gives.txt) with proper priority
         local primaryCount = 0
         for _, w in ipairs(PrimaryWords) do
             if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
-                local priority = 999
                 if #Config.SuffixModes > 0 then
-                    priority = getWordPriority(w)
+                    local priority = getWordPriority(w)
                     if priority < 999 then
                         addWordToResults(w, priority)
                         primaryCount = primaryCount + 1
@@ -1550,6 +1552,7 @@ do
             end
         end
         
+        -- If we have suffixes but need more words, also check Fallback words
         if #Config.SuffixModes > 0 and primaryCount < MAX_RESULTS then
             for _, w in ipairs(FallbackWords) do
                 if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
@@ -1563,6 +1566,7 @@ do
             end
         end
         
+        -- If no suffixes, add remaining Fallback words
         if eVal == "" and primaryCount < MAX_RESULTS then
             for _, w in ipairs(FallbackWords) do
                 if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
@@ -1573,15 +1577,17 @@ do
             end
         end
         
+        -- Sort results by priority FIRST, then by length within each priority
         local sortedResults = {}
         local priorities = {}
         for p, _ in pairs(priorityResults) do
             table.insert(priorities, p)
         end
-        table.sort(priorities)
+        table.sort(priorities)  -- Sort priorities (lower number = higher priority)
         
         for _, p in ipairs(priorities) do
             local group = priorityResults[p]
+            -- Sort each priority group by length (shortest first), then alphabetically
             table.sort(group, function(a, b) 
                 if #a ~= #b then 
                     return #a < #b 
@@ -1595,6 +1601,7 @@ do
             if #sortedResults >= MAX_RESULTS then break end
         end
         
+        -- Display results
         local displayLimit = math.min(200, #sortedResults)
         for i = 1, displayLimit do
             local w = sortedResults[i]
@@ -1630,11 +1637,29 @@ do
             lbl.BackgroundTransparency = 1
             lbl.TextXAlignment = Enum.TextXAlignment.Left
             
+            -- Color code based on which suffix priority it matches
             if #Config.SuffixModes > 0 then
+                local matchedSuffix = nil
+                local matchedPriority = 999
                 for _, s in ipairs(Config.SuffixModes) do
                     if #w >= #s and w:sub(-#s) == s then
-                        lbl.TextColor3 = THEME.Accent
-                        break
+                        local p = suffixPriority[s] or 999
+                        if p < matchedPriority then
+                            matchedPriority = p
+                            matchedSuffix = s
+                        end
+                    end
+                end
+                if matchedSuffix then
+                    -- Priority 1 = bright green, Priority 2 = yellow, Priority 3 = blue
+                    if matchedPriority == 1 then
+                        lbl.TextColor3 = THEME.Success  -- Green
+                    elseif matchedPriority == 2 then
+                        lbl.TextColor3 = THEME.Warning  -- Yellow
+                    elseif matchedPriority == 3 then
+                        lbl.TextColor3 = THEME.Accent   -- Blue
+                    else
+                        lbl.TextColor3 = Color3.fromRGB(200, 150, 255)  -- Purple for others
                     end
                 end
             end
