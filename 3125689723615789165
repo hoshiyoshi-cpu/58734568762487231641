@@ -2291,11 +2291,19 @@ runConn = RunService.Heartbeat:Connect(function()
                             local c = detected:sub(1,1)
                             if c ~= "#" and Buckets and Buckets[c] then
                                 for _, w in ipairs(Buckets[c]) do
-                                    if w == detected then isCompleted = true break end
+                                    if w == detected then 
+                                        isCompleted = true 
+                                        break 
+                                    end
                                 end
                             end
                         end
                         if isCompleted then
+                            -- Add to used words when completed
+                            if not UsedWords[detected] then
+                                UsedWords[detected] = tick()
+                                ShowToast("Added to used words: " .. detected, "success")
+                            end
                             StatusText.Text = "Completed: " .. detected .. " <font color=\"rgb(100,255,140)\">✓</font>"
                             StatusText.TextColor3 = THEME.Success
                             Tween(StatusDot, {BackgroundColor3 = THEME.Success})
