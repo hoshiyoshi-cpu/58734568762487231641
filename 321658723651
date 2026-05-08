@@ -1810,8 +1810,8 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 2: Find suffix priority words (must start with typed prefix AND end with suffix) ==========
-    -- This search should NOT be limited by MAX_WORD_SCAN
+   -- ========== STEP 2: Find suffix priority words (must start with typed prefix AND end with suffix) ==========
+    -- This search stops early once we find the shortest possible word
     local suffixWords = {}
     local usedInPriority = {}
     if shortestWord then usedInPriority[shortestWord] = true end
@@ -1825,9 +1825,18 @@ UpdateList = function(detectedText, requiredLetter)
         local bestSuffixWord = nil
         local shortestLen = math.huge
         
-        -- Search through ALL words in the bucket (no limit!)
+        -- Search through ALL words in the bucket (no limit, but stops early)
         if searchBucket then
+            -- First, find the minimum possible length we can achieve
+            -- A word must be at least: length of prefix + length of suffix
+            local minPossibleLen = #searchPrefix + #suffix
+            
             for _, w in ipairs(searchBucket) do
+                -- Skip if word is longer than our current best (optimization)
+                if #w >= shortestLen then
+                    continue
+                end
+                
                 -- Skip blacklisted/used words
                 if not Blacklist[w] and not UsedWords[w] and not usedInPriority[w] then
                     -- Check length requirement
@@ -1836,9 +1845,13 @@ UpdateList = function(detectedText, requiredLetter)
                         if w:sub(1, #searchPrefix) == searchPrefix then
                             -- Check if word ends with suffix
                             if #w >= #suffix and w:sub(-#suffix) == suffix then
-                                if #w < shortestLen then
-                                    shortestLen = #w
-                                    bestSuffixWord = w
+                                -- Found a candidate
+                                shortestLen = #w
+                                bestSuffixWord = w
+                                
+                                -- If we've reached the minimum possible length, we can stop searching
+                                if #w == minPossibleLen then
+                                    break
                                 end
                             end
                         end
