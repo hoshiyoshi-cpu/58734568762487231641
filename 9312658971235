@@ -1817,7 +1817,8 @@ UpdateList = function(detectedText, requiredLetter)
 
     for _, suffix in ipairs(suffixList) do
         local bestSuffixWord = nil
-        local bestMatchScore = -1  -- Higher score = better match
+        local bestMatchScore = -1
+        local bestMatchLen = 0
         
         -- Search through ALL words that start with the required first letter
         local firstLetterBucket = requiredFirstLetter and Buckets[requiredFirstLetter] or AllWords
@@ -1830,7 +1831,7 @@ UpdateList = function(detectedText, requiredLetter)
                     if lengthMode == 0 or #w == lengthMode then
                         -- Check if word ends with suffix
                         if #w >= #suffix and w:sub(-#suffix) == suffix then
-                            -- Calculate match score based on how well it matches the typed prefix
+                            -- Calculate how many letters match the typed prefix
                             local matchLen = 0
                             local maxMatch = math.min(#w, #searchPrefix)
                             for i = 1, maxMatch do
@@ -1841,12 +1842,25 @@ UpdateList = function(detectedText, requiredLetter)
                                 end
                             end
                             
-                            -- Score: longer prefix match = better, shorter word = better for ties
-                            local score = matchLen * 1000 - #w
-                            
-                            if score > bestMatchScore then
-                                bestMatchScore = score
-                                bestSuffixWord = w
+                            -- CRITICAL: Only consider words that match ALL typed letters so far
+                            -- AND match at least 1 letter (when searchPrefix is not empty)
+                            if matchLen == #searchPrefix and #searchPrefix > 0 then
+                                -- Score: shorter word is better for ties
+                                local score = -#w
+                                
+                                if score > bestMatchScore then
+                                    bestMatchScore = score
+                                    bestMatchLen = matchLen
+                                    bestSuffixWord = w
+                                end
+                            elseif #searchPrefix == 0 then
+                                -- When nothing typed yet, show shortest word
+                                local score = -#w
+                                if score > bestMatchScore then
+                                    bestMatchScore = score
+                                    bestMatchLen = matchLen
+                                    bestSuffixWord = w
+                                end
                             end
                         end
                     end
@@ -1854,7 +1868,9 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
-        if bestSuffixWord then
+        -- ONLY add the word if it perfectly matches ALL typed letters
+        -- OR if nothing is typed yet (shows the best candidate)
+        if bestSuffixWord and (#searchPrefix == 0 or bestMatchLen == #searchPrefix) then
             table.insert(suffixWords, bestSuffixWord)
             usedInPriority[bestSuffixWord] = true
         end
