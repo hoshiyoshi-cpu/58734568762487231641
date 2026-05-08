@@ -1811,23 +1811,37 @@ UpdateList = function(detectedText, requiredLetter)
     end
     
     -- ========== STEP 2: Find suffix priority words (must start with typed prefix AND end with suffix) ==========
+    -- This search should NOT be limited by MAX_WORD_SCAN
     local suffixWords = {}
     local usedInPriority = {}
     if shortestWord then usedInPriority[shortestWord] = true end
+
+    -- Get the bucket for the first letter of the prefix (or required letter)
+    local searchFirstChar = searchPrefix:sub(1,1)
+    if searchFirstChar == "" then searchFirstChar = requiredFirstLetter end
+    local searchBucket = searchFirstChar and Buckets[searchFirstChar] or AllWords
 
     for _, suffix in ipairs(suffixList) do
         local bestSuffixWord = nil
         local shortestLen = math.huge
         
-        -- Search through words that start with the typed prefix
-        for _, w in ipairs(prefixMatchingWords) do
-            -- Check not already used
-            if not usedInPriority[w] then
-                -- Check if word ends with suffix
-                if #w >= #suffix and w:sub(-#suffix) == suffix then
-                    if #w < shortestLen then
-                        shortestLen = #w
-                        bestSuffixWord = w
+        -- Search through ALL words in the bucket (no limit!)
+        if searchBucket then
+            for _, w in ipairs(searchBucket) do
+                -- Skip blacklisted/used words
+                if not Blacklist[w] and not UsedWords[w] and not usedInPriority[w] then
+                    -- Check length requirement
+                    if lengthMode == 0 or #w == lengthMode then
+                        -- Check if word starts with typed prefix
+                        if w:sub(1, #searchPrefix) == searchPrefix then
+                            -- Check if word ends with suffix
+                            if #w >= #suffix and w:sub(-#suffix) == suffix then
+                                if #w < shortestLen then
+                                    shortestLen = #w
+                                    bestSuffixWord = w
+                                end
+                            end
+                        end
                     end
                 end
             end
