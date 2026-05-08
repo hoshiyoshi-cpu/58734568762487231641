@@ -2285,6 +2285,7 @@ runConn = RunService.Heartbeat:Connect(function()
                     for _, b in ipairs(ButtonCache) do if b.Visible then visCount = visCount + 1 end end
                     StatsData.Count.Text = "Words: " .. visCount .. "+"
                 else
+                    -- Add this to your heartbeat loop where detected word is processed:
                     if detected ~= "" then
                         local isCompleted = false
                         if #detected > 2 then
@@ -2299,20 +2300,23 @@ runConn = RunService.Heartbeat:Connect(function()
                             end
                         end
                         if isCompleted then
-                            -- Add to used words when completed
-                            if not UsedWords[detected] then
-                                UsedWords[detected] = tick()
-                                ShowToast("Added to used words: " .. detected, "success")
-                            end
                             StatusText.Text = "Completed: " .. detected .. " <font color=\"rgb(100,255,140)\">✓</font>"
                             StatusText.TextColor3 = THEME.Success
                             Tween(StatusDot, {BackgroundColor3 = THEME.Success})
-                            lastManualInput = detected
+                            lastManualInput = detected  -- Store the completed word
                         else
                             StatusText.Text = "Input: " .. detected
                             StatusText.TextColor3 = THEME.Accent
                             Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
                         end
+                    end
+
+                    -- And add this check somewhere in the heartbeat loop (after the above):
+                    if lastManualInput ~= "" and (detected == "" or #detected < #lastManualInput) then
+                        UsedWords[lastManualInput] = tick()
+                        ShowToast("Added to used words: " .. lastManualInput, "success")
+                        lastManualInput = ""
+                        forceUpdateList = true
                     end
 
                     if forceUpdateList then
