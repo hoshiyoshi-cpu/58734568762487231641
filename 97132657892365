@@ -2667,10 +2667,24 @@ runConn = RunService.Heartbeat:Connect(function()
                 StatusText.Text = "Word is Censored"
                 StatusText.TextColor3 = THEME.Warning
                 Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
-                for _, btn in ipairs(ButtonCache) do btn.Visible = false end
+                -- Don't hide buttons when censored - allow manual search
+                -- for _, btn in ipairs(ButtonCache) do btn.Visible = false end
             end
-            listUpdatePending = false
-            forceUpdateList = false
+            
+            -- Still allow manual search even when censored
+            if SearchBox and SearchBox.Text ~= "" then
+                -- Let manual search work
+                if listUpdatePending and (now - lastInputTime > LIST_DEBOUNCE) then
+                    listUpdatePending = false
+                    UpdateList(lastDetected, lastRequiredLetter)
+                end
+            else
+                -- Only clear buttons if no manual search
+                for _, btn in ipairs(ButtonCache) do btn.Visible = false end
+                listUpdatePending = false
+                forceUpdateList = false
+            end
+            
             currentBestMatch = nil
             lastDetected = detected
             lastRequiredLetter = requiredLetter
