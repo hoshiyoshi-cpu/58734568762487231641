@@ -678,10 +678,6 @@ local function AddWordsToFile(filePath, words, isPrimary)
     
     local success, err = pcall(function() writefile(filePath, newContent) end)
     if success then
-        -- Track custom added words
-        for _, word in ipairs(addedWords) do
-            AddToCustomTracking(word)
-        end
         ShowToast("Added " .. #addedWords .. " word(s): " .. table.concat(addedWords, ", "), "success")
         return true
     else
