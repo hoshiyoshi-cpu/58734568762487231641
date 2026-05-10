@@ -2590,10 +2590,17 @@ MinBtn.MouseButton1Click:Connect(function()
 end)
 
 -- =============================================
--- STATS OVERLAY (DISABLED)
+-- STATS OVERLAY (DISABLED - No errors)
 -- =============================================
 
-local StatsData = { Frame = nil }
+local StatsData = {
+    Frame = { Visible = function() end },
+    Timer = { Text = "" },
+    Count = { Text = "" }
+}
+setmetatable(StatsData.Frame, { __index = function() return { Visible = function() end } end })
+setmetatable(StatsData.Timer, { __index = function() return "" end })
+setmetatable(StatsData.Count, { __index = function() return "" end })
 
 -- =============================================
 -- MAIN HEARTBEAT LOOP
