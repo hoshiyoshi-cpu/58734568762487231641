@@ -1846,10 +1846,46 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 4: Sort GIVE words based on mode ==========
+    -- =============================================
+    -- REPLACE ONLY THE GIVE WORDS SORTING SECTION (around line ~800-850)
+    -- =============================================
+
+    -- STEP 4: Sort GIVE words based on mode
     local sortedGive = {}
-    
-    if sortMode == "Smart" then
+
+    if sortMode == "Strategic" then
+        -- Strategic: Sort by length, but randomize within same length groups
+        local lengthGroups = {}
+        
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+            end
+            table.insert(lengthGroups[len], w)
+        end
+        
+        -- Get all lengths and sort them
+        local sortedLengths = {}
+        for len, _ in pairs(lengthGroups) do
+            table.insert(sortedLengths, len)
+        end
+        table.sort(sortedLengths)
+        
+        -- For each length group, randomize then add to result
+        for _, len in ipairs(sortedLengths) do
+            local group = lengthGroups[len]
+            -- Fisher-Yates shuffle for this group
+            for i = #group, 2, -1 do
+                local j = math.random(i)
+                group[i], group[j] = group[j], group[i]
+            end
+            for _, w in ipairs(group) do
+                table.insert(sortedGive, w)
+            end
+        end
+        
+    elseif sortMode == "Smart" then
         local mediumGive = {}  -- 6-9 letters
         local shortGive = {}   -- 1-5 letters
         local longGive = {}    -- 10+ letters
@@ -1879,15 +1915,48 @@ UpdateList = function(detectedText, requiredLetter)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    else
+    else  -- "Shortest" (unchanged)
         table.sort(giveWords, function(a,b) return #a < #b end)
         sortedGive = giveWords
     end
-    
-    -- ========== STEP 5: Sort FALLBACK words ==========
+
+    -- =============================================
+    -- REPLACE THE FALLBACK WORDS SORTING SECTION (around line ~860-890)
+    -- =============================================
+
+    -- STEP 5: Sort FALLBACK words
     local sortedFallback = {}
-    
-    if sortMode == "Random" then
+
+    if sortMode == "Strategic" then
+        -- Strategic: Sort by length, randomize within same length groups
+        local lengthGroups = {}
+        
+        for _, w in ipairs(fallbackWords) do
+            local len = #w
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+            end
+            table.insert(lengthGroups[len], w)
+        end
+        
+        local sortedLengths = {}
+        for len, _ in pairs(lengthGroups) do
+            table.insert(sortedLengths, len)
+        end
+        table.sort(sortedLengths)
+        
+        for _, len in ipairs(sortedLengths) do
+            local group = lengthGroups[len]
+            for i = #group, 2, -1 do
+                local j = math.random(i)
+                group[i], group[j] = group[j], group[i]
+            end
+            for _, w in ipairs(group) do
+                table.insert(sortedFallback, w)
+            end
+        end
+        
+    elseif sortMode == "Random" then
         for i = #fallbackWords, 2, -1 do
             local j = math.random(i)
             fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
@@ -1899,7 +1968,7 @@ UpdateList = function(detectedText, requiredLetter)
             fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
         end
         sortedFallback = fallbackWords
-    else
+    else  -- "Shortest" (unchanged)
         table.sort(fallbackWords, function(a,b) return #a < #b end)
         sortedFallback = fallbackWords
     end
