@@ -1311,7 +1311,7 @@ end)
 
 local AddWordsFrame = Instance.new("Frame", ScreenGui)
 AddWordsFrame.Name = "AddWordsFrame"
-AddWordsFrame.Size = UDim2.new(0, 340, 0, 230)
+AddWordsFrame.Size = UDim2.new(0, 340, 0, 200)
 AddWordsFrame.Position = UDim2.new(0.5, -170, 0.5, -115)
 AddWordsFrame.BackgroundColor3 = THEME.Background
 AddWordsFrame.Visible = false
@@ -1377,20 +1377,31 @@ AWFallbackAddBtn.Font = Enum.Font.GothamBold
 AWFallbackAddBtn.TextSize = 11
 AWFallbackAddBtn.BackgroundColor3 = THEME.ItemBG
 AWFallbackAddBtn.TextColor3 = THEME.Warning
-AWFallbackAddBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWFallbackAddBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWFallbackAddBtn.Position = UDim2.new(0, 10, 0, 115)
 Instance.new("UICorner", AWFallbackAddBtn).CornerRadius = UDim.new(0, 6)
 
 -- Add to Both button
 local AWBothAddBtn = Instance.new("TextButton", AddWordsFrame)
-AWBothAddBtn.Text = "+ Both (F+B)"
+AWBothAddBtn.Text = "+ Both"
 AWBothAddBtn.Font = Enum.Font.GothamBold
 AWBothAddBtn.TextSize = 11
 AWBothAddBtn.BackgroundColor3 = THEME.Accent
 AWBothAddBtn.TextColor3 = THEME.Text
-AWBothAddBtn.Size = UDim2.new(0.32, -5, 0, 30)
-AWBothAddBtn.Position = UDim2.new(0.34, 0, 0, 115)
+AWBothAddBtn.Size = UDim2.new(0.23, -5, 0, 30)
+AWBothAddBtn.Position = UDim2.new(0.25, 0, 0, 115)
 Instance.new("UICorner", AWBothAddBtn).CornerRadius = UDim.new(0, 6)
+
+-- Clear input button
+local AWClearBtn = Instance.new("TextButton", AddWordsFrame)
+AWClearBtn.Text = "Clear"
+AWClearBtn.Font = Enum.Font.GothamBold
+AWClearBtn.TextSize = 11
+AWClearBtn.BackgroundColor3 = THEME.ItemBG
+AWClearBtn.TextColor3 = THEME.SubText
+AWClearBtn.Size = UDim2.new(0.23, -5, 0, 30)
+AWClearBtn.Position = UDim2.new(0.52, 0, 0, 115)
+Instance.new("UICorner", AWClearBtn).CornerRadius = UDim.new(0, 6)
 
 -- ===== REMOVE BUTTONS (Bottom row) =====
 -- Remove from Fallback button
@@ -1400,34 +1411,109 @@ AWFallbackRemoveBtn.Font = Enum.Font.GothamBold
 AWFallbackRemoveBtn.TextSize = 11
 AWFallbackRemoveBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 AWFallbackRemoveBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
-AWFallbackRemoveBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWFallbackRemoveBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWFallbackRemoveBtn.Position = UDim2.new(0, 10, 0, 150)
 Instance.new("UICorner", AWFallbackRemoveBtn).CornerRadius = UDim.new(0, 6)
 
 -- Remove from Both button
 local AWBothRemoveBtn = Instance.new("TextButton", AddWordsFrame)
-AWBothRemoveBtn.Text = "- Both (F+B)"
+AWBothRemoveBtn.Text = "- Both"
 AWBothRemoveBtn.Font = Enum.Font.GothamBold
 AWBothRemoveBtn.TextSize = 11
 AWBothRemoveBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 AWBothRemoveBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
-AWBothRemoveBtn.Size = UDim2.new(0.32, -5, 0, 30)
-AWBothRemoveBtn.Position = UDim2.new(0.34, 0, 0, 150)
+AWBothRemoveBtn.Size = UDim2.new(0.23, -5, 0, 30)
+AWBothRemoveBtn.Position = UDim2.new(0.25, 0, 0, 150)
 Instance.new("UICorner", AWBothRemoveBtn).CornerRadius = UDim.new(0, 6)
 
--- Clear input button
-local AWClearBtn = Instance.new("TextButton", AddWordsFrame)
-AWClearBtn.Text = "Clear"
-AWClearBtn.Font = Enum.Font.GothamBold
-AWClearBtn.TextSize = 11
-AWClearBtn.BackgroundColor3 = THEME.ItemBG
-AWClearBtn.TextColor3 = THEME.SubText
-AWClearBtn.Size = UDim2.new(0.32, -5, 0, 30)
-AWClearBtn.Position = UDim2.new(0.68, 0, 0, 115)
-Instance.new("UICorner", AWClearBtn).CornerRadius = UDim.new(0, 6)
-AWClearBtn.MouseButton1Click:Connect(function()
-    AWAddBox.Text = ""
-    AWAddBox:ReleaseFocus()
+-- Refresh button
+local AWRefreshBtn = Instance.new("TextButton", AddWordsFrame)
+AWRefreshBtn.Text = "⟳ Refresh"
+AWRefreshBtn.Font = Enum.Font.GothamBold
+AWRefreshBtn.TextSize = 11
+AWRefreshBtn.BackgroundColor3 = THEME.Success
+AWRefreshBtn.TextColor3 = THEME.Background
+AWRefreshBtn.Size = UDim2.new(0.23, -5, 0, 30)
+AWRefreshBtn.Position = UDim2.new(0.52, 0, 0, 150)
+Instance.new("UICorner", AWRefreshBtn).CornerRadius = UDim.new(0, 6)
+
+-- Refresh function (reloads everything from files without restart)
+local function FullRefresh()
+    ShowToast("Refreshing word lists...", "warning")
+    
+    -- Clear existing data
+    local oldAllWords = AllWords
+    AllWords = {}
+    SeenWords = {}
+    
+    -- Reload from files (not from web)
+    LoadFallbackWords()
+    LoadPrimaryWords()
+    RefreshGiveWordsLookup()
+    
+    -- Rebuild all buckets
+    Buckets = {}
+    for _, w in ipairs(AllWords) do
+        local c = w:sub(1,1) or ""
+        if c == "" then c = "#" end
+        Buckets[c] = Buckets[c] or {}
+        table.insert(Buckets[c], w)
+    end
+    
+    PrimaryBuckets = {}
+    for _, w in ipairs(PrimaryWords) do
+        local c = w:sub(1,1) or ""
+        if c == "" then c = "#" end
+        PrimaryBuckets[c] = PrimaryBuckets[c] or {}
+        table.insert(PrimaryBuckets[c], w)
+    end
+    
+    FallbackBuckets = {}
+    for _, w in ipairs(FallbackWords) do
+        local c = w:sub(1,1) or ""
+        if c == "" then c = "#" end
+        FallbackBuckets[c] = FallbackBuckets[c] or {}
+        table.insert(FallbackBuckets[c], w)
+    end
+    
+    -- Reload custom words from config
+    if Config.CustomWords then
+        for _, w in ipairs(Config.CustomWords) do
+            local clean = w:gsub("[%s%c]+", ""):lower()
+            if #clean > 0 then
+                local c = clean:sub(1,1) or ""
+                if c == "" then c = "#" end
+                Buckets[c] = Buckets[c] or {}
+                local exists = false
+                for _, existing in ipairs(Buckets[c]) do
+                    if existing == clean then exists = true; break end
+                end
+                if not exists then
+                    table.insert(Buckets[c], clean)
+                    table.insert(AllWords, clean)
+                end
+            end
+        end
+    end
+    
+    -- Force UI update
+    forceUpdateList = true
+    lastDetected = "---"
+    if UpdateList then
+        UpdateList(lastDetected, lastRequiredLetter)
+    end
+    
+    -- Update status
+    StatusText.Text = "Refreshed! " .. #AllWords .. " total words"
+    StatusText.TextColor3 = THEME.Success
+    Tween(StatusDot, {BackgroundColor3 = THEME.Success})
+    
+    ShowToast("Refreshed! " .. #AllWords .. " words loaded", "success")
+end
+
+-- Refresh button click handler
+AWRefreshBtn.MouseButton1Click:Connect(function()
+    FullRefresh()
 end)
 
 -- Reload all word lists
