@@ -1438,18 +1438,53 @@ AWRefreshBtn.Position = UDim2.new(0.52, 0, 0, 150)
 Instance.new("UICorner", AWRefreshBtn).CornerRadius = UDim.new(0, 6)
 
 -- Refresh function (reloads everything from files without restart)
+-- Refresh function (reloads everything from files without restart)
 local function FullRefresh()
     ShowToast("Refreshing word lists...", "warning")
     
-    -- Clear existing data
+    -- Clear ALL existing data properly
     local oldAllWords = AllWords
     AllWords = {}
+    PrimaryWords = {}
+    FallbackWords = {}
     SeenWords = {}
     
     -- Reload from files (not from web)
-    LoadFallbackWords()
-    LoadPrimaryWords()
-    RefreshGiveWordsLookup()
+    -- First, reload Primary words from gives_cached.txt
+    if isfile and isfile(givesFileName) then
+        local content = readfile(givesFileName)
+        if content then
+            for w in content:gmatch("[^\r\n]+") do
+                local clean = w:gsub("[%s%c]+", ""):lower()
+                if #clean > 0 and not SeenWords[clean] then
+                    SeenWords[clean] = true
+                    table.insert(PrimaryWords, clean)
+                    table.insert(AllWords, clean)
+                end
+            end
+        end
+    end
+    
+    -- Then reload Fallback words from yinglish.txt
+    if isfile and isfile(fileName) then
+        local content = readfile(fileName)
+        if content then
+            for w in content:gmatch("[^\r\n]+") do
+                local clean = w:gsub("[%s%c]+", ""):lower()
+                if #clean > 0 and not SeenWords[clean] then
+                    SeenWords[clean] = true
+                    table.insert(FallbackWords, clean)
+                    table.insert(AllWords, clean)
+                end
+            end
+        end
+    end
+    
+    -- CRITICAL: Rebuild GiveWordsLookup (this is what determines GIVE vs FALLBACK)
+    GiveWordsLookup = {}
+    for i = 1, #PrimaryWords do
+        GiveWordsLookup[PrimaryWords[i]] = true
+    end
     
     -- Rebuild all buckets
     Buckets = {}
@@ -1476,11 +1511,12 @@ local function FullRefresh()
         table.insert(FallbackBuckets[c], w)
     end
     
-    -- Reload custom words from config
+    -- Re-add custom words from config if any
     if Config.CustomWords then
         for _, w in ipairs(Config.CustomWords) do
             local clean = w:gsub("[%s%c]+", ""):lower()
-            if #clean > 0 then
+            if #clean > 0 and not SeenWords[clean] then
+                table.insert(AllWords, clean)
                 local c = clean:sub(1,1) or ""
                 if c == "" then c = "#" end
                 Buckets[c] = Buckets[c] or {}
@@ -1490,11 +1526,12 @@ local function FullRefresh()
                 end
                 if not exists then
                     table.insert(Buckets[c], clean)
-                    table.insert(AllWords, clean)
                 end
             end
         end
     end
+    
+    SeenWords = nil
     
     -- Force UI update
     forceUpdateList = true
@@ -1504,11 +1541,11 @@ local function FullRefresh()
     end
     
     -- Update status
-    StatusText.Text = "Refreshed! " .. #AllWords .. " total words"
+    StatusText.Text = "Refreshed! " .. #AllWords .. " total words (" .. #PrimaryWords .. " gives, " .. #FallbackWords .. " fallback)"
     StatusText.TextColor3 = THEME.Success
     Tween(StatusDot, {BackgroundColor3 = THEME.Success})
     
-    ShowToast("Refreshed! " .. #AllWords .. " words loaded", "success")
+    ShowToast("Refreshed! " .. #PrimaryWords .. " gives, " .. #FallbackWords .. " fallback", "success")
 end
 
 -- Refresh button click handler
