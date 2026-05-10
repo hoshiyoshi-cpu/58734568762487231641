@@ -215,6 +215,10 @@ local function LoadTrackingData()
 end
 
 local function FetchPrimaryWords()
+    -- FIRST: Load tracking data to know custom words
+    local tracking = LoadTrackingData()
+    
+    -- SECOND: Download fresh online words (but don't save yet)
     UpdateStatus("Fetching PRIMARY word list from web...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = givesUrl, Method = "GET"})
@@ -222,17 +226,15 @@ local function FetchPrimaryWords()
     
     local onlineWords = {}
     if success and res and res.Body then
-        writefile(givesFileName, res.Body)
-        UpdateStatus("Primary words fetched!", THEME.Success)
-        
         for w in res.Body:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then
                 onlineWords[clean] = true
             end
         end
+        UpdateStatus("Primary words fetched!", THEME.Success)
     else
-        -- Fallback to existing file
+        -- If download fails, try to load existing file
         if isfile and isfile(givesFileName) then
             local content = readfile(givesFileName)
             for w in content:gmatch("[^\r\n]+") do
@@ -244,39 +246,35 @@ local function FetchPrimaryWords()
         end
     end
     
-    -- Load tracking to know which custom words go to GIVES
-    local tracking = LoadTrackingData()
-    
-    -- Add custom words that belong in GIVES (type "gives" or "both")
-    local customAdded = {}
+    -- THIRD: Add custom words that should be in GIVES (type "gives" or "both")
     for word, type in pairs(tracking) do
         if type == "gives" or type == "both" then
             if not onlineWords[word] then
-                customAdded[word] = true
+                onlineWords[word] = true
             end
         end
     end
     
-    -- Merge: online words + eligible custom words
+    -- FOURTH: Save the merged result (online + custom)
     local mergedWords = {}
     for word in pairs(onlineWords) do
         table.insert(mergedWords, word)
     end
-    for word in pairs(customAdded) do
-        table.insert(mergedWords, word)
-    end
+    table.sort(mergedWords)
     
     if writefile then
-        table.sort(mergedWords)
         writefile(givesFileName, table.concat(mergedWords, "\n"))
     end
     
-    UpdateStatus("Primary: " .. #onlineWords .. " online + " .. (#mergedWords - #onlineWords) .. " custom = " .. #mergedWords, THEME.Success)
+    UpdateStatus("Primary: " .. #mergedWords .. " total words", THEME.Success)
     return true, table.concat(mergedWords, "\n")
 end
 
--- Modified FetchFallbackWords (similar but for FALLBACK file)
 local function FetchFallbackWords()
+    -- FIRST: Load tracking data
+    local tracking = LoadTrackingData()
+    
+    -- SECOND: Download fresh online words
     UpdateStatus("Fetching FALLBACK word list from web...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = url, Method = "GET"})
@@ -284,15 +282,13 @@ local function FetchFallbackWords()
     
     local onlineWords = {}
     if success and res and res.Body then
-        writefile(fileName, res.Body)
-        UpdateStatus("Fallback words fetched!", THEME.Success)
-        
         for w in res.Body:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then
                 onlineWords[clean] = true
             end
         end
+        UpdateStatus("Fallback words fetched!", THEME.Success)
     else
         if isfile and isfile(fileName) then
             local content = readfile(fileName)
@@ -305,34 +301,27 @@ local function FetchFallbackWords()
         end
     end
     
-    -- Load tracking to know which custom words go to FALLBACK
-    local tracking = LoadTrackingData()
-    
-    -- Add custom words that belong in FALLBACK (type "fallback" or "both")
-    local customAdded = {}
+    -- THIRD: Add custom words that should be in FALLBACK (type "fallback" or "both")
     for word, type in pairs(tracking) do
         if type == "fallback" or type == "both" then
             if not onlineWords[word] then
-                customAdded[word] = true
+                onlineWords[word] = true
             end
         end
     end
     
-    -- Merge
+    -- FOURTH: Save the merged result
     local mergedWords = {}
     for word in pairs(onlineWords) do
         table.insert(mergedWords, word)
     end
-    for word in pairs(customAdded) do
-        table.insert(mergedWords, word)
-    end
+    table.sort(mergedWords)
     
     if writefile then
-        table.sort(mergedWords)
         writefile(fileName, table.concat(mergedWords, "\n"))
     end
     
-    UpdateStatus("Fallback: " .. #onlineWords .. " online + " .. (#mergedWords - #onlineWords) .. " custom = " .. #mergedWords, THEME.Success)
+    UpdateStatus("Fallback: " .. #mergedWords .. " total words", THEME.Success)
     return true, table.concat(mergedWords, "\n")
 end
 
