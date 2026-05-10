@@ -2184,45 +2184,10 @@ MinBtn.MouseButton1Click:Connect(function()
 end)
 
 -- =============================================
--- STATS OVERLAY
+-- STATS OVERLAY (DISABLED)
 -- =============================================
 
-local StatsData = {}
-do
-    local sf = Instance.new("Frame")
-    sf.Name = "StatsFrame"
-    sf.Size = UDim2.new(0, 120, 0, 60)
-    sf.Position = UDim2.new(0.5, -60, 0, 10)
-    sf.BackgroundColor3 = THEME.Background
-    sf.Visible = false
-    sf.Parent = ScreenGui
-    EnableDragging(sf)
-    Instance.new("UICorner", sf).CornerRadius = UDim.new(0, 8)
-    Instance.new("UIStroke", sf).Color = THEME.Accent
-    StatsData.Frame = sf
-
-    local st = Instance.new("TextLabel")
-    st.Size = UDim2.new(1, 0, 0, 25)
-    st.Position = UDim2.new(0, 0, 0, 5)
-    st.BackgroundTransparency = 1
-    st.TextColor3 = THEME.Text
-    st.Font = Enum.Font.GothamBold
-    st.TextSize = 20
-    st.Text = "--"
-    st.Parent = sf
-    StatsData.Timer = st
-
-    local sc = Instance.new("TextLabel")
-    sc.Size = UDim2.new(1, 0, 0, 20)
-    sc.Position = UDim2.new(0, 0, 0, 30)
-    sc.BackgroundTransparency = 1
-    sc.TextColor3 = THEME.SubText
-    sc.Font = Enum.Font.Gotham
-    sc.TextSize = 12
-    sc.Text = "Words: 0"
-    sc.Parent = sf
-    StatsData.Count = sc
-end
+local StatsData = { Frame = nil }
 
 -- =============================================
 -- MAIN HEARTBEAT LOOP
