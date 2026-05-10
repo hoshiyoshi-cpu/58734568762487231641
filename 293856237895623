@@ -802,7 +802,7 @@ ManageWordsBtn.Position = UDim2.new(0, 15, 0, 65)
 Instance.new("UICorner", ManageWordsBtn).CornerRadius = UDim.new(0, 4)
 
 local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
-ServerBrowserBtn.Text = "Server Browser"
+ServerBrowserBtn.Text = "Blacklist"
 ServerBrowserBtn.Font = Enum.Font.GothamMedium
 ServerBrowserBtn.TextSize = 11
 ServerBrowserBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
@@ -902,6 +902,52 @@ UWList.CanvasSize = UDim2.new(0, 0, 0, 0)
 local UWLayout = Instance.new("UIListLayout", UWList)
 UWLayout.Padding = UDim.new(0, 2)
 UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local BlacklistFile = "blacklist.txt"
+
+-- Load blacklist from file
+local function LoadBlacklistFromFile()
+    local loaded = {}
+    if isfile and isfile(BlacklistFile) then
+        local success, content = pcall(function() return readfile(BlacklistFile) end)
+        if success and content then
+            for line in content:gmatch("[^\r\n]+") do
+                local word = line:gsub("[%s%c]+", ""):lower()
+                if #word > 0 then
+                    loaded[word] = true
+                end
+            end
+        end
+    end
+    return loaded
+end
+
+-- Save blacklist to file
+local function SaveBlacklistToFile()
+    if not writefile then return end
+    local lines = {}
+    for word, _ in pairs(Blacklist) do
+        table.insert(lines, word)
+    end
+    table.sort(lines)
+    local content = table.concat(lines, "\n")
+    pcall(function() writefile(BlacklistFile, content) end)
+end
+
+SaveBlacklistToFile()
+
+-- Load existing blacklist from file (overrides Config.TrapPrefixes for word blocking)
+local fileBlacklist = LoadBlacklistFromFile()
+for word, _ in pairs(fileBlacklist) do
+    Blacklist[word] = true
+end
+
+-- Also add any from Config.TrapPrefixes for backward compatibility
+if Config.TrapPrefixes then
+    for _, word in ipairs(Config.TrapPrefixes) do
+        Blacklist[word] = true
+    end
+end
 
 local RefreshUsedWords
 local lastRefreshHash = ""
@@ -1237,160 +1283,209 @@ end)
 
 RefreshCustomWords()
 
--- =============================================
--- SERVER BROWSER
--- =============================================
+-- Replace the ServerFrame with BlacklistFrame
+local BlacklistFrame = Instance.new("Frame", ScreenGui)
+BlacklistFrame.Name = "BlacklistFrame"
+BlacklistFrame.Size = UDim2.new(0, 300, 0, 400)
+BlacklistFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+BlacklistFrame.BackgroundColor3 = THEME.Background
+BlacklistFrame.Visible = false
+BlacklistFrame.ClipsDescendants = true
+EnableDragging(BlacklistFrame)
+Instance.new("UICorner", BlacklistFrame).CornerRadius = UDim.new(0, 8)
+local BLStroke = Instance.new("UIStroke", BlacklistFrame)
+BLStroke.Color = Color3.fromRGB(255, 100, 100)
+BLStroke.Transparency = 0.3
+BLStroke.Thickness = 2
 
-local ServerFrame = Instance.new("Frame", ScreenGui)
-ServerFrame.Name = "ServerBrowser"
-ServerFrame.Size = UDim2.new(0, 350, 0, 400)
-ServerFrame.Position = UDim2.new(0.5, -175, 0.5, -200)
-ServerFrame.BackgroundColor3 = THEME.Background
-ServerFrame.Visible = false
-ServerFrame.ClipsDescendants = true
-EnableDragging(ServerFrame)
-Instance.new("UICorner", ServerFrame).CornerRadius = UDim.new(0, 8)
-local SBStroke = Instance.new("UIStroke", ServerFrame)
-SBStroke.Color = THEME.Accent
-SBStroke.Transparency = 0.5
-SBStroke.Thickness = 2
+local BLHeader = Instance.new("TextLabel", BlacklistFrame)
+BLHeader.Text = "Blacklist Manager"
+BLHeader.Font = Enum.Font.GothamBold
+BLHeader.TextSize = 16
+BLHeader.TextColor3 = Color3.fromRGB(255, 100, 100)
+BLHeader.Size = UDim2.new(1, 0, 0, 40)
+BLHeader.BackgroundTransparency = 1
 
-local SBHeader = Instance.new("TextLabel", ServerFrame)
-SBHeader.Text = "Server Browser"
-SBHeader.Font = Enum.Font.GothamBold
-SBHeader.TextSize = 16
-SBHeader.TextColor3 = THEME.Text
-SBHeader.Size = UDim2.new(1, 0, 0, 40)
-SBHeader.BackgroundTransparency = 1
+local BLClose = Instance.new("TextButton", BlacklistFrame)
+BLClose.Text = "X"
+BLClose.Font = Enum.Font.GothamBold
+BLClose.TextSize = 16
+BLClose.TextColor3 = Color3.fromRGB(255, 100, 100)
+BLClose.Size = UDim2.new(0, 40, 0, 40)
+BLClose.Position = UDim2.new(1, -40, 0, 0)
+BLClose.BackgroundTransparency = 1
+BLClose.MouseButton1Click:Connect(function() BlacklistFrame.Visible = false end)
 
-local SBClose = Instance.new("TextButton", ServerFrame)
-SBClose.Text = "X"
-SBClose.Font = Enum.Font.GothamBold
-SBClose.TextSize = 16
-SBClose.TextColor3 = Color3.fromRGB(255, 100, 100)
-SBClose.Size = UDim2.new(0, 40, 0, 40)
-SBClose.Position = UDim2.new(1, -40, 0, 0)
-SBClose.BackgroundTransparency = 1
-SBClose.MouseButton1Click:Connect(function() ServerFrame.Visible = false end)
+-- Count label
+local BLCountLabel = Instance.new("TextLabel", BlacklistFrame)
+BLCountLabel.Font = Enum.Font.Gotham
+BLCountLabel.TextSize = 12
+BLCountLabel.TextColor3 = THEME.SubText
+BLCountLabel.Size = UDim2.new(1, -20, 0, 20)
+BLCountLabel.Position = UDim2.new(0, 10, 0, 45)
+BLCountLabel.BackgroundTransparency = 1
+BLCountLabel.TextXAlignment = Enum.TextXAlignment.Left
+BLCountLabel.Text = "0 blacklisted words"
 
-local SBList = Instance.new("ScrollingFrame", ServerFrame)
-SBList.Size = UDim2.new(1, -20, 1, -90)
-SBList.Position = UDim2.new(0, 10, 0, 50)
-SBList.BackgroundTransparency = 1
-SBList.ScrollBarThickness = 3
-SBList.ScrollBarImageColor3 = THEME.Accent
+-- Add word section
+local BLAddBox = Instance.new("TextBox", BlacklistFrame)
+BLAddBox.Font = Enum.Font.Gotham
+BLAddBox.TextSize = 12
+BLAddBox.BackgroundColor3 = THEME.ItemBG
+BLAddBox.Size = UDim2.new(1, -20, 0, 30)
+BLAddBox.Position = UDim2.new(0, 10, 0, 70)
+Instance.new("UICorner", BLAddBox).CornerRadius = UDim.new(0, 6)
+BLAddBox.PlaceholderText = "Enter word to blacklist..."
+BLAddBox.PlaceholderColor3 = THEME.SubText
+BLAddBox.TextColor3 = THEME.Text
+BLAddBox.Text = ""
+BLAddBox.ClearTextOnFocus = false
 
-local SBLayout = Instance.new("UIListLayout", SBList)
-SBLayout.Padding = UDim.new(0, 5)
-SBLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local BLAddBtn = Instance.new("TextButton", BlacklistFrame)
+BLAddBtn.Text = "Blacklist"
+BLAddBtn.Font = Enum.Font.GothamBold
+BLAddBtn.TextSize = 12
+BLAddBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+BLAddBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+BLAddBtn.Size = UDim2.new(1, -20, 0, 30)
+BLAddBtn.Position = UDim2.new(0, 10, 0, 105)
+Instance.new("UICorner", BLAddBtn).CornerRadius = UDim.new(0, 6)
 
-local ServerSortMode = "Smallest"
+-- Search box
+local BLSearchBox = Instance.new("TextBox", BlacklistFrame)
+BLSearchBox.Font = Enum.Font.Gotham
+BLSearchBox.TextSize = 12
+BLSearchBox.BackgroundColor3 = THEME.ItemBG
+BLSearchBox.Size = UDim2.new(1, -20, 0, 24)
+BLSearchBox.Position = UDim2.new(0, 10, 0, 145)
+Instance.new("UICorner", BLSearchBox).CornerRadius = UDim.new(0, 4)
+BLSearchBox.PlaceholderText = "Search blacklist..."
+BLSearchBox.PlaceholderColor3 = THEME.SubText
+BLSearchBox.TextColor3 = THEME.Text
+BLSearchBox.Text = ""
+BLSearchBox.ClearTextOnFocus = false
 
-local SBSortBtn = Instance.new("TextButton", ServerFrame)
-SBSortBtn.Text = "Sort: Smallest"
-SBSortBtn.Font = Enum.Font.GothamBold
-SBSortBtn.TextSize = 12
-SBSortBtn.BackgroundColor3 = THEME.ItemBG
-SBSortBtn.TextColor3 = THEME.SubText
-SBSortBtn.Size = UDim2.new(0.5, -15, 0, 30)
-SBSortBtn.Position = UDim2.new(0, 10, 1, -40)
-Instance.new("UICorner", SBSortBtn).CornerRadius = UDim.new(0, 6)
+-- List of blacklisted words
+local BLList = Instance.new("ScrollingFrame", BlacklistFrame)
+BLList.Size = UDim2.new(1, -20, 1, -210)
+BLList.Position = UDim2.new(0, 10, 0, 175)
+BLList.BackgroundTransparency = 1
+BLList.ScrollBarThickness = 3
+BLList.ScrollBarImageColor3 = Color3.fromRGB(255, 100, 100)
 
-local SBRefresh = Instance.new("TextButton", ServerFrame)
-SBRefresh.Text = "Refresh"
-SBRefresh.Font = Enum.Font.GothamBold
-SBRefresh.TextSize = 12
-SBRefresh.BackgroundColor3 = THEME.Accent
-SBRefresh.Size = UDim2.new(0.5, -15, 0, 30)
-SBRefresh.Position = UDim2.new(0.5, 5, 1, -40)
-Instance.new("UICorner", SBRefresh).CornerRadius = UDim.new(0, 6)
+local BLListLayout = Instance.new("UIListLayout", BLList)
+BLListLayout.Padding = UDim.new(0, 2)
+BLListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local function FetchServers()
-    SBRefresh.Text = "..."
-    for _, c in ipairs(SBList:GetChildren()) do
+-- Refresh blacklist display
+local function RefreshBlacklistDisplay()
+    for _, c in ipairs(BLList:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
-    task.spawn(function()
-        local success, result = pcall(function()
-            return request({
-                Url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100",
-                Method = "GET"
-            })
-        end)
-        if success and result and result.Body then
-            local data = HttpService:JSONDecode(result.Body)
-            if data and data.data then
-                local servers = data.data
-                if ServerSortMode == "Smallest" then
-                    table.sort(servers, function(a,b) return (a.playing or 0) < (b.playing or 0) end)
-                else
-                    table.sort(servers, function(a,b) return (a.playing or 0) > (b.playing or 0) end)
-                end
-                for _, srv in ipairs(servers) do
-                    if srv.playing and srv.maxPlayers and srv.id ~= game.JobId then
-                        local row = Instance.new("Frame", SBList)
-                        row.Size = UDim2.new(1, -6, 0, 45)
-                        row.BackgroundColor3 = THEME.ItemBG
-                        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
-                        local info = Instance.new("TextLabel", row)
-                        info.Text = "Players: " .. srv.playing .. " / " .. srv.maxPlayers .. "\nPing: " .. (srv.ping or "?") .. "ms"
-                        info.Size = UDim2.new(0.6, 0, 1, 0)
-                        info.Position = UDim2.new(0, 10, 0, 0)
-                        info.BackgroundTransparency = 1
-                        info.TextColor3 = THEME.Text
-                        info.Font = Enum.Font.Gotham
-                        info.TextSize = 12
-                        info.TextXAlignment = Enum.TextXAlignment.Left
-                        local join = Instance.new("TextButton", row)
-                        join.Text = "Join"
-                        join.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-                        join.Size = UDim2.new(0, 80, 0, 25)
-                        join.Position = UDim2.new(1, -90, 0.5, -12.5)
-                        join.Font = Enum.Font.GothamBold
-                        join.TextSize = 12
-                        join.TextColor3 = Color3.fromRGB(255,255,255)
-                        Instance.new("UICorner", join).CornerRadius = UDim.new(0, 4)
-                        join.MouseButton1Click:Connect(function()
-                            join.Text = "Joining..."
-                            ShowToast("Teleporting...", "success")
-                            if queue_on_teleport then
-                                queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/skrylor/Last-Letter-Script/refs/heads/main/Last%20Letter.lua"))()')
-                            end
-                            task.spawn(function()
-                                local success, err = pcall(function()
-                                    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, srv.id, Players.LocalPlayer)
-                                end)
-                                if not success then
-                                    join.Text = "Failed"
-                                    ShowToast("Teleport Failed: " .. tostring(err), "error")
-                                    task.wait(2)
-                                    join.Text = "Join"
-                                end
-                            end)
-                        end)
-                    end
-                end
-                SBList.CanvasSize = UDim2.new(0,0,0, SBLayout.AbsoluteContentSize.Y)
-            end
-        else
-            ShowToast("Failed to fetch servers", "error")
+    
+    local query = BLSearchBox.Text:lower():gsub("[%s%c]+", "")
+    local blacklistedWords = {}
+    for word, _ in pairs(Blacklist) do
+        table.insert(blacklistedWords, word)
+    end
+    table.sort(blacklistedWords)
+    
+    local shownCount = 0
+    for i, word in ipairs(blacklistedWords) do
+        if query == "" or word:find(query, 1, true) then
+            shownCount = shownCount + 1
+            local row = Instance.new("Frame", BLList)
+            row.Size = UDim2.new(1, -6, 0, 26)
+            row.BackgroundColor3 = (shownCount % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
+            row.BorderSizePixel = 0
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            
+            local lbl = Instance.new("TextLabel", row)
+            lbl.Text = word
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 12
+            lbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+            lbl.Size = UDim2.new(1, -35, 1, 0)
+            lbl.Position = UDim2.new(0, 8, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            
+            local unblacklist = Instance.new("TextButton", row)
+            unblacklist.Text = "✓"
+            unblacklist.Font = Enum.Font.GothamBold
+            unblacklist.TextSize = 14
+            unblacklist.TextColor3 = THEME.Success
+            unblacklist.Size = UDim2.new(0, 26, 1, 0)
+            unblacklist.Position = UDim2.new(1, -26, 0, 0)
+            unblacklist.BackgroundTransparency = 1
+            unblacklist.MouseButton1Click:Connect(function()
+                Blacklist[word] = nil
+                SaveBlacklistToFile()
+                RefreshBlacklistDisplay()
+                forceUpdateList = true
+                ShowToast("Removed from blacklist: " .. word, "success")
+            end)
         end
-        SBRefresh.Text = "Refresh"
-    end)
+    end
+    
+    BLCountLabel.Text = #blacklistedWords .. " blacklisted words"
+    BLList.CanvasSize = UDim2.new(0, 0, 0, shownCount * 28)
 end
 
-SBSortBtn.MouseButton1Click:Connect(function()
-    ServerSortMode = (ServerSortMode == "Smallest") and "Largest" or "Smallest"
-    SBSortBtn.Text = "Sort: " .. ServerSortMode
-    FetchServers()
+-- Add word to blacklist
+BLAddBtn.MouseButton1Click:Connect(function()
+    local word = BLAddBox.Text:lower():gsub("[%s%c]+", "")
+    if #word < 2 then
+        ShowToast("Word must be at least 2 letters!", "warning")
+        return
+    end
+    
+    if Blacklist[word] then
+        ShowToast("Word already blacklisted!", "warning")
+        return
+    end
+    
+    Blacklist[word] = true
+    SaveBlacklistToFile()
+    BLAddBox.Text = ""
+    BLAddBox:ReleaseFocus()
+    RefreshBlacklistDisplay()
+    forceUpdateList = true
+    ShowToast("Blacklisted: " .. word, "error")
 end)
-SBRefresh.MouseButton1Click:Connect(FetchServers)
+
+-- Enter key support
+BLAddBox.FocusLost:Connect(function(enter)
+    if enter then
+        BLAddBtn.MouseButton1Click:Fire()
+    end
+end)
+
+-- Search functionality
+BLSearchBox:GetPropertyChangedSignal("Text"):Connect(RefreshBlacklistDisplay)
+
+-- Refresh on visibility
+local lastBlacklistRefresh = 0
+BlacklistFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+    if BlacklistFrame.Visible then
+        RefreshBlacklistDisplay()
+    end
+end)
+
+-- Replace the button click handler
 ServerBrowserBtn.MouseButton1Click:Connect(function()
-    ServerFrame.Visible = not ServerFrame.Visible
-    ServerFrame.Parent = nil
-    ServerFrame.Parent = ScreenGui
-    if ServerFrame.Visible then FetchServers() end
+    BlacklistFrame.Visible = not BlacklistFrame.Visible
+    BlacklistFrame.Parent = nil
+    BlacklistFrame.Parent = ScreenGui
+    if BlacklistFrame.Visible then 
+        RefreshBlacklistDisplay()
+    end
 end)
+
+-- Also make sure the UpdateList function respects the blacklist (it already does)
+-- But add a toast when a word is blocked from being used
+local originalGetWordsByPrefix = GetWordsByPrefix or function() end
+-- (The blacklist is already checked in the existing UpdateList code with: if not Blacklist[w] ...)
 
 -- =============================================
 -- WORD BROWSER
