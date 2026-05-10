@@ -195,49 +195,145 @@ local function RefreshTrapLookup()
 end
 
 -- =============================================
--- FETCH FUNCTIONS
+-- UPDATED FETCH FUNCTIONS (Download + Merge Custom Words)
 -- =============================================
 
-local function FetchPrimaryWords()
-    -- Check if local file already exists
-    if isfile and isfile(givesFileName) then
-        UpdateStatus("Using cached PRIMARY words (add words to add more)", THEME.Success)
-        return true, nil  -- Use local file
+local function LoadTrackingData()
+    local tracking = {}
+    if isfile and isfile(CustomAddedFile) then
+        local success, content = pcall(function() return readfile(CustomAddedFile) end)
+        if success and content then
+            for line in content:gmatch("[^\r\n]+") do
+                local w, type = line:match("([^:]+):(.+)")
+                if w and type then
+                    tracking[w] = type
+                end
+            end
+        end
     end
-    
+    return tracking
+end
+
+local function FetchPrimaryWords()
     UpdateStatus("Fetching PRIMARY word list from web...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = givesUrl, Method = "GET"})
     end)
+    
+    local onlineWords = {}
     if success and res and res.Body then
         writefile(givesFileName, res.Body)
         UpdateStatus("Primary words fetched!", THEME.Success)
-        return true, res.Body
+        
+        for w in res.Body:gmatch("[^\r\n]+") do
+            local clean = w:gsub("[%s%c]+", ""):lower()
+            if #clean > 0 then
+                onlineWords[clean] = true
+            end
+        end
     else
-        UpdateStatus("Failed to fetch primary words!", Color3.fromRGB(255, 80, 80))
-        return false, nil
-    end
-end
-
-local function FetchFallbackWords()
-    -- Check if local file already exists
-    if isfile and isfile(fileName) then
-        UpdateStatus("Using cached FALLBACK words (add words to add more)", THEME.Success)
-        return true, nil  -- Use local file
+        -- Fallback to existing file
+        if isfile and isfile(givesFileName) then
+            local content = readfile(givesFileName)
+            for w in content:gmatch("[^\r\n]+") do
+                local clean = w:gsub("[%s%c]+", ""):lower()
+                if #clean > 0 then
+                    onlineWords[clean] = true
+                end
+            end
+        end
     end
     
+    -- Load tracking to know which custom words go to GIVES
+    local tracking = LoadTrackingData()
+    
+    -- Add custom words that belong in GIVES (type "gives" or "both")
+    local customAdded = {}
+    for word, type in pairs(tracking) do
+        if type == "gives" or type == "both" then
+            if not onlineWords[word] then
+                customAdded[word] = true
+            end
+        end
+    end
+    
+    -- Merge: online words + eligible custom words
+    local mergedWords = {}
+    for word in pairs(onlineWords) do
+        table.insert(mergedWords, word)
+    end
+    for word in pairs(customAdded) do
+        table.insert(mergedWords, word)
+    end
+    
+    if writefile then
+        table.sort(mergedWords)
+        writefile(givesFileName, table.concat(mergedWords, "\n"))
+    end
+    
+    UpdateStatus("Primary: " .. #onlineWords .. " online + " .. (#mergedWords - #onlineWords) .. " custom = " .. #mergedWords, THEME.Success)
+    return true, table.concat(mergedWords, "\n")
+end
+
+-- Modified FetchFallbackWords (similar but for FALLBACK file)
+local function FetchFallbackWords()
     UpdateStatus("Fetching FALLBACK word list from web...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = url, Method = "GET"})
     end)
+    
+    local onlineWords = {}
     if success and res and res.Body then
         writefile(fileName, res.Body)
         UpdateStatus("Fallback words fetched!", THEME.Success)
-        return true, res.Body
+        
+        for w in res.Body:gmatch("[^\r\n]+") do
+            local clean = w:gsub("[%s%c]+", ""):lower()
+            if #clean > 0 then
+                onlineWords[clean] = true
+            end
+        end
     else
-        UpdateStatus("Failed to fetch fallback words!", Color3.fromRGB(255, 80, 80))
-        return false, nil
+        if isfile and isfile(fileName) then
+            local content = readfile(fileName)
+            for w in content:gmatch("[^\r\n]+") do
+                local clean = w:gsub("[%s%c]+", ""):lower()
+                if #clean > 0 then
+                    onlineWords[clean] = true
+                end
+            end
+        end
     end
+    
+    -- Load tracking to know which custom words go to FALLBACK
+    local tracking = LoadTrackingData()
+    
+    -- Add custom words that belong in FALLBACK (type "fallback" or "both")
+    local customAdded = {}
+    for word, type in pairs(tracking) do
+        if type == "fallback" or type == "both" then
+            if not onlineWords[word] then
+                customAdded[word] = true
+            end
+        end
+    end
+    
+    -- Merge
+    local mergedWords = {}
+    for word in pairs(onlineWords) do
+        table.insert(mergedWords, word)
+    end
+    for word in pairs(customAdded) do
+        table.insert(mergedWords, word)
+    end
+    
+    if writefile then
+        table.sort(mergedWords)
+        writefile(fileName, table.concat(mergedWords, "\n"))
+    end
+    
+    UpdateStatus("Fallback: " .. #onlineWords .. " online + " .. (#mergedWords - #onlineWords) .. " custom = " .. #mergedWords, THEME.Success)
+    return true, table.concat(mergedWords, "\n")
 end
 
 local function FetchTrapsAndGives()
@@ -412,32 +508,45 @@ local function LoadCustomAddedWords()
 end
 
 -- Save custom added word to tracking file
-local function AddToCustomTracking(word)
+local function AddToCustomTracking(word, fileType)  -- fileType: "fallback", "gives", or "both"
     if not writefile then return end
-    local existing = {}
-    if isfile(CustomAddedFile) then
+    
+    -- Load existing tracking data
+    local tracking = {}
+    if isfile and isfile(CustomAddedFile) then
         local success, content = pcall(function() return readfile(CustomAddedFile) end)
         if success and content then
             for line in content:gmatch("[^\r\n]+") do
-                local w = line:gsub("[%s%c]+", ""):lower()
-                if #w > 0 then
-                    existing[w] = true
+                -- Format: "word:fallback" or "word:both" or "word:gives"
+                local w, type = line:match("([^:]+):(.+)")
+                if w and type then
+                    tracking[w] = type
                 end
             end
         end
     end
     
-    if not existing[word] then
-        local content = ""
-        if isfile(CustomAddedFile) then
-            content = readfile(CustomAddedFile)
-            if content ~= "" and not content:match("\n$") then
-                content = content .. "\n"
-            end
+    -- Update tracking for this word
+    if fileType == "both" then
+        tracking[word] = "both"
+    elseif fileType == "fallback" then
+        -- Only set if not already "both" (both overrides fallback)
+        if tracking[word] ~= "both" then
+            tracking[word] = "fallback"
         end
-        content = content .. word
-        pcall(function() writefile(CustomAddedFile, content) end)
+    elseif fileType == "gives" then
+        if tracking[word] ~= "both" then
+            tracking[word] = "gives"
+        end
     end
+    
+    -- Save tracking
+    local lines = {}
+    for w, t in pairs(tracking) do
+        table.insert(lines, w .. ":" .. t)
+    end
+    table.sort(lines)
+    pcall(function() writefile(CustomAddedFile, table.concat(lines, "\n")) end)
 end
 
 -- Remove word from tracking file
@@ -1586,6 +1695,13 @@ AWFallbackAddBtn.MouseButton1Click:Connect(function()
     end
     
     if AddWordsToFile(fileName, words, false) then
+        -- After adding, track with "fallback" type
+        for part in words:gmatch("[^,]+") do
+            local word = part:gsub("[%s%c]+", ""):lower()
+            if #word >= 2 then
+                AddToCustomTracking(word, "fallback")  -- ← CHANGE HERE
+            end
+        end
         ReloadAllWordLists()
         AWAddBox.Text = ""
     end
@@ -1603,6 +1719,13 @@ AWBothAddBtn.MouseButton1Click:Connect(function()
     local addedToGives = AddWordsToFile(givesFileName, words, true)
     
     if addedToFallback or addedToGives then
+        -- After adding, track with "both" type
+        for part in words:gmatch("[^,]+") do
+            local word = part:gsub("[%s%c]+", ""):lower()
+            if #word >= 2 then
+                AddToCustomTracking(word, "both")  -- ← CHANGE HERE
+            end
+        end
         ReloadAllWordLists()
         AWAddBox.Text = ""
     end
