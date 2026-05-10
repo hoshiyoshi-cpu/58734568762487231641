@@ -1345,8 +1345,8 @@ end)
 
 local AddWordsFrame = Instance.new("Frame", ScreenGui)
 AddWordsFrame.Name = "AddWordsFrame"
-AddWordsFrame.Size = UDim2.new(0, 340, 0, 200)
-AddWordsFrame.Position = UDim2.new(0.5, -170, 0.5, -115)
+AddWordsFrame.Size = UDim2.new(0, 320, 0, 170)  -- Slightly shorter
+AddWordsFrame.Position = UDim2.new(0.5, -160, 0.5, -115)
 AddWordsFrame.BackgroundColor3 = THEME.Background
 AddWordsFrame.Visible = false
 AddWordsFrame.ClipsDescendants = true
@@ -1375,33 +1375,22 @@ AWClose.Position = UDim2.new(1, -35, 0, 0)
 AWClose.BackgroundTransparency = 1
 AWClose.MouseButton1Click:Connect(function() AddWordsFrame.Visible = false end)
 
--- Instructions label
-local AWInstructions = Instance.new("TextLabel", AddWordsFrame)
-AWInstructions.Text = "Enter words separated by commas (e.g., hello,world,test)"
-AWInstructions.Font = Enum.Font.Gotham
-AWInstructions.TextSize = 10
-AWInstructions.TextColor3 = THEME.SubText
-AWInstructions.Size = UDim2.new(1, -20, 0, 20)
-AWInstructions.Position = UDim2.new(0, 10, 0, 40)
-AWInstructions.BackgroundTransparency = 1
-AWInstructions.TextXAlignment = Enum.TextXAlignment.Left
-
--- Word input box
+-- Word input box (centered, simplified placeholder)
 local AWAddBox = Instance.new("TextBox", AddWordsFrame)
 AWAddBox.Font = Enum.Font.Gotham
 AWAddBox.TextSize = 12
 AWAddBox.BackgroundColor3 = THEME.ItemBG
-AWAddBox.Size = UDim2.new(1, -20, 0, 50)
-AWAddBox.Position = UDim2.new(0, 10, 0, 60)
+AWAddBox.Size = UDim2.new(0.9, 0, 0, 50)
+AWAddBox.Position = UDim2.new(0.05, 0, 0, 45)
 Instance.new("UICorner", AWAddBox).CornerRadius = UDim.new(0, 6)
-AWAddBox.PlaceholderText = "word1, word2, word3..."
+AWAddBox.PlaceholderText = "word/s"
 AWAddBox.PlaceholderColor3 = THEME.SubText
 AWAddBox.TextColor3 = THEME.Text
 AWAddBox.Text = ""
 AWAddBox.ClearTextOnFocus = false
 AWAddBox.TextWrapped = true
-AWAddBox.TextXAlignment = Enum.TextXAlignment.Left
-AWAddBox.TextYAlignment = Enum.TextYAlignment.Top
+AWAddBox.TextXAlignment = Enum.TextXAlignment.Center
+AWAddBox.TextYAlignment = Enum.TextYAlignment.Center
 
 -- ===== ADD BUTTONS (Top row) =====
 -- Add to Fallback button
@@ -1412,7 +1401,7 @@ AWFallbackAddBtn.TextSize = 11
 AWFallbackAddBtn.BackgroundColor3 = THEME.ItemBG
 AWFallbackAddBtn.TextColor3 = THEME.Warning
 AWFallbackAddBtn.Size = UDim2.new(0.23, -5, 0, 30)
-AWFallbackAddBtn.Position = UDim2.new(0, 10, 0, 115)
+AWFallbackAddBtn.Position = UDim2.new(0, 10, 0, 105)
 Instance.new("UICorner", AWFallbackAddBtn).CornerRadius = UDim.new(0, 6)
 
 -- Add to Both button
@@ -1423,7 +1412,7 @@ AWBothAddBtn.TextSize = 11
 AWBothAddBtn.BackgroundColor3 = THEME.ItemBG  
 AWBothAddBtn.TextColor3 = THEME.Warning  
 AWBothAddBtn.Size = UDim2.new(0.23, -5, 0, 30)
-AWBothAddBtn.Position = UDim2.new(0.25, 0, 0, 115)
+AWBothAddBtn.Position = UDim2.new(0.25, 0, 0, 105)
 Instance.new("UICorner", AWBothAddBtn).CornerRadius = UDim.new(0, 6)
 
 -- Clear input button
@@ -1434,7 +1423,7 @@ AWClearBtn.TextSize = 11
 AWClearBtn.BackgroundColor3 = THEME.ItemBG
 AWClearBtn.TextColor3 = THEME.SubText
 AWClearBtn.Size = UDim2.new(0.23, -5, 0, 30)
-AWClearBtn.Position = UDim2.new(0.52, 0, 0, 115)
+AWClearBtn.Position = UDim2.new(0.52, 0, 0, 105)
 Instance.new("UICorner", AWClearBtn).CornerRadius = UDim.new(0, 6)
 
 -- ===== REMOVE BUTTONS (Bottom row) =====
@@ -1446,7 +1435,7 @@ AWFallbackRemoveBtn.TextSize = 11
 AWFallbackRemoveBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 AWFallbackRemoveBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
 AWFallbackRemoveBtn.Size = UDim2.new(0.23, -5, 0, 30)
-AWFallbackRemoveBtn.Position = UDim2.new(0, 10, 0, 150)
+AWFallbackRemoveBtn.Position = UDim2.new(0, 10, 0, 140)
 Instance.new("UICorner", AWFallbackRemoveBtn).CornerRadius = UDim.new(0, 6)
 
 -- Remove from Both button
@@ -1457,7 +1446,7 @@ AWBothRemoveBtn.TextSize = 11
 AWBothRemoveBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 AWBothRemoveBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
 AWBothRemoveBtn.Size = UDim2.new(0.23, -5, 0, 30)
-AWBothRemoveBtn.Position = UDim2.new(0.25, 0, 0, 150)
+AWBothRemoveBtn.Position = UDim2.new(0.25, 0, 0, 140)
 Instance.new("UICorner", AWBothRemoveBtn).CornerRadius = UDim.new(0, 6)
 
 -- Refresh button
@@ -1468,7 +1457,7 @@ AWRefreshBtn.TextSize = 11
 AWRefreshBtn.BackgroundColor3 = THEME.Success
 AWRefreshBtn.TextColor3 = THEME.Background
 AWRefreshBtn.Size = UDim2.new(0.23, -5, 0, 30)
-AWRefreshBtn.Position = UDim2.new(0.52, 0, 0, 150)
+AWRefreshBtn.Position = UDim2.new(0.52, 0, 0, 140)
 Instance.new("UICorner", AWRefreshBtn).CornerRadius = UDim.new(0, 6)
 
 -- Reload all word lists
