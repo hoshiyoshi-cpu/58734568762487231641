@@ -934,8 +934,6 @@ local function SaveBlacklistToFile()
     pcall(function() writefile(BlacklistFile, content) end)
 end
 
-SaveBlacklistToFile()
-
 -- Load existing blacklist from file (overrides Config.TrapPrefixes for word blocking)
 local fileBlacklist = LoadBlacklistFromFile()
 for word, _ in pairs(fileBlacklist) do
