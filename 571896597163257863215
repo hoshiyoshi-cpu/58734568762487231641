@@ -121,6 +121,8 @@ local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads
 local fileName = "yinglish.txt"
 local givesFileName = "gives_cached.txt"
 local CustomAddedFile = "customadded.txt"
+local customFallbackFile = "customfallback.txt"  
+local customGivesFile = "customgives.txt"       
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -195,30 +197,41 @@ local function RefreshTrapLookup()
 end
 
 -- =============================================
--- UPDATED FETCH FUNCTIONS (Download + Merge Custom Words)
+-- CUSTOM FILE HELPER FUNCTIONS
 -- =============================================
 
-local function LoadTrackingData()
-    local tracking = {}
-    if isfile and isfile(CustomAddedFile) then
-        local success, content = pcall(function() return readfile(CustomAddedFile) end)
+local function LoadCustomWordsFromFile(filePath)
+    local words = {}
+    if isfile and isfile(filePath) then
+        local success, content = pcall(function() return readfile(filePath) end)
         if success and content then
             for line in content:gmatch("[^\r\n]+") do
-                local w, type = line:match("([^:]+):(.+)")
-                if w and type then
-                    tracking[w] = type
+                local clean = line:gsub("[%s%c]+", ""):lower()
+                if #clean > 0 then
+                    words[clean] = true
                 end
             end
         end
     end
-    return tracking
+    return words
 end
 
+local function SaveCustomWordsToFile(filePath, words)
+    if not writefile then return end
+    local lines = {}
+    for word in pairs(words) do
+        table.insert(lines, word)
+    end
+    table.sort(lines)
+    local content = table.concat(lines, "\n")
+    pcall(function() writefile(filePath, content) end)
+end
+
+-- =============================================
+-- UPDATED FETCH FUNCTIONS (Web + Custom files)
+-- =============================================
+
 local function FetchPrimaryWords()
-    -- FIRST: Load tracking data to know custom words
-    local tracking = LoadTrackingData()
-    
-    -- SECOND: Download fresh online words (but don't save yet)
     UpdateStatus("Fetching PRIMARY word list from web...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = givesUrl, Method = "GET"})
@@ -226,13 +239,16 @@ local function FetchPrimaryWords()
     
     local onlineWords = {}
     if success and res and res.Body then
+        -- Save the original web version
+        writefile(givesFileName, res.Body)
+        UpdateStatus("Primary words fetched!", THEME.Success)
+        
         for w in res.Body:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then
                 onlineWords[clean] = true
             end
         end
-        UpdateStatus("Primary words fetched!", THEME.Success)
     else
         -- If download fails, try to load existing file
         if isfile and isfile(givesFileName) then
@@ -246,35 +262,29 @@ local function FetchPrimaryWords()
         end
     end
     
-    -- THIRD: Add custom words that should be in GIVES (type "gives" or "both")
-    for word, type in pairs(tracking) do
-        if type == "gives" or type == "both" then
-            if not onlineWords[word] then
-                onlineWords[word] = true
-            end
+    -- Load custom gives words from separate file
+    local customWords = LoadCustomWordsFromFile(customGivesFile)
+    
+    -- Merge online + custom gives words (but don't save to web file)
+    local allPrimaryWords = {}
+    for word in pairs(onlineWords) do
+        table.insert(allPrimaryWords, word)
+    end
+    for word in pairs(customWords) do
+        if not onlineWords[word] then
+            table.insert(allPrimaryWords, word)
         end
     end
+    table.sort(allPrimaryWords)
     
-    -- FOURTH: Save the merged result (online + custom)
-    local mergedWords = {}
-    for word in pairs(onlineWords) do
-        table.insert(mergedWords, word)
-    end
-    table.sort(mergedWords)
+    -- Return the merged list as content
+    local mergedContent = table.concat(allPrimaryWords, "\n")
     
-    if writefile then
-        writefile(givesFileName, table.concat(mergedWords, "\n"))
-    end
-    
-    UpdateStatus("Primary: " .. #mergedWords .. " total words", THEME.Success)
-    return true, table.concat(mergedWords, "\n")
+    UpdateStatus("Primary: " .. #onlineWords .. " online + " .. (#allPrimaryWords - #onlineWords) .. " custom = " .. #allPrimaryWords, THEME.Success)
+    return true, mergedContent
 end
 
 local function FetchFallbackWords()
-    -- FIRST: Load tracking data
-    local tracking = LoadTrackingData()
-    
-    -- SECOND: Download fresh online words
     UpdateStatus("Fetching FALLBACK word list from web...", THEME.Warning)
     local success, res = pcall(function()
         return request({Url = url, Method = "GET"})
@@ -282,13 +292,15 @@ local function FetchFallbackWords()
     
     local onlineWords = {}
     if success and res and res.Body then
+        writefile(fileName, res.Body)
+        UpdateStatus("Fallback words fetched!", THEME.Success)
+        
         for w in res.Body:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then
                 onlineWords[clean] = true
             end
         end
-        UpdateStatus("Fallback words fetched!", THEME.Success)
     else
         if isfile and isfile(fileName) then
             local content = readfile(fileName)
@@ -301,28 +313,25 @@ local function FetchFallbackWords()
         end
     end
     
-    -- THIRD: Add custom words that should be in FALLBACK (type "fallback" or "both")
-    for word, type in pairs(tracking) do
-        if type == "fallback" or type == "both" then
-            if not onlineWords[word] then
-                onlineWords[word] = true
-            end
+    -- Load custom fallback words from separate file
+    local customWords = LoadCustomWordsFromFile(customFallbackFile)
+    
+    -- Merge online + custom fallback words
+    local allFallbackWords = {}
+    for word in pairs(onlineWords) do
+        table.insert(allFallbackWords, word)
+    end
+    for word in pairs(customWords) do
+        if not onlineWords[word] then
+            table.insert(allFallbackWords, word)
         end
     end
+    table.sort(allFallbackWords)
     
-    -- FOURTH: Save the merged result
-    local mergedWords = {}
-    for word in pairs(onlineWords) do
-        table.insert(mergedWords, word)
-    end
-    table.sort(mergedWords)
+    local mergedContent = table.concat(allFallbackWords, "\n")
     
-    if writefile then
-        writefile(fileName, table.concat(mergedWords, "\n"))
-    end
-    
-    UpdateStatus("Fallback: " .. #mergedWords .. " total words", THEME.Success)
-    return true, table.concat(mergedWords, "\n")
+    UpdateStatus("Fallback: " .. #onlineWords .. " online + " .. (#allFallbackWords - #onlineWords) .. " custom = " .. #allFallbackWords, THEME.Success)
+    return true, mergedContent
 end
 
 local function FetchTrapsAndGives()
@@ -480,33 +489,15 @@ local function GetMatchLength(str, prefix)
     return len
 end
 
-local function LoadCustomAddedWords()
-    local loaded = {}
-    if isfile and isfile(CustomAddedFile) then
-        local success, content = pcall(function() return readfile(CustomAddedFile) end)
-        if success and content then
-            for line in content:gmatch("[^\r\n]+") do
-                local word = line:gsub("[%s%c]+", ""):lower()
-                if #word > 0 then
-                    loaded[word] = true
-                end
-            end
-        end
-    end
-    return loaded
-end
-
 -- Save custom added word to tracking file
 local function AddToCustomTracking(word, fileType)  -- fileType: "fallback", "gives", or "both"
     if not writefile then return end
     
-    -- Load existing tracking data
     local tracking = {}
     if isfile and isfile(CustomAddedFile) then
         local success, content = pcall(function() return readfile(CustomAddedFile) end)
         if success and content then
             for line in content:gmatch("[^\r\n]+") do
-                -- Format: "word:fallback" or "word:both" or "word:gives"
                 local w, type = line:match("([^:]+):(.+)")
                 if w and type then
                     tracking[w] = type
@@ -515,11 +506,9 @@ local function AddToCustomTracking(word, fileType)  -- fileType: "fallback", "gi
         end
     end
     
-    -- Update tracking for this word
     if fileType == "both" then
         tracking[word] = "both"
     elseif fileType == "fallback" then
-        -- Only set if not already "both" (both overrides fallback)
         if tracking[word] ~= "both" then
             tracking[word] = "fallback"
         end
@@ -529,7 +518,6 @@ local function AddToCustomTracking(word, fileType)  -- fileType: "fallback", "gi
         end
     end
     
-    -- Save tracking
     local lines = {}
     for w, t in pairs(tracking) do
         table.insert(lines, w .. ":" .. t)
@@ -558,121 +546,73 @@ local function RemoveFromCustomTracking(word)
     pcall(function() writefile(CustomAddedFile, newContent) end)
 end
 
--- Helper function to remove words from a specific file
-local function RemoveWordsFromFile(filePath, words)
+-- Helper function to add words to custom files
+local function AddWordsToCustomFile(filePath, words)
+    if not writefile or not isfile then
+        ShowToast("File writing not supported!", "error")
+        return false
+    end
+    
+    -- Load existing custom words
+    local customWords = LoadCustomWordsFromFile(filePath)
+    
+    -- Add new words
+    local addedWords = {}
+    for part in words:gmatch("[^,]+") do
+        local word = part:gsub("[%s%c]+", ""):lower()
+        if #word >= 2 then
+            if not customWords[word] then
+                customWords[word] = true
+                table.insert(addedWords, word)
+            end
+        end
+    end
+    
+    if #addedWords == 0 then
+        ShowToast("No new words to add (all already exist)!", "warning")
+        return false
+    end
+    
+    -- Save to custom file
+    SaveCustomWordsToFile(filePath, customWords)
+    return true, addedWords
+end
+
+-- Helper function to remove words from custom files
+local function RemoveWordsFromCustomFile(filePath, words)
     if not writefile or not isfile then
         ShowToast("File writing not supported!", "error")
         return false
     end
     
     if not isfile(filePath) then
-        ShowToast("File not found!", "warning")
+        ShowToast("No custom words file found!", "warning")
         return false
     end
     
-    -- Read existing content
-    local success, content = pcall(function() return readfile(filePath) end)
-    if not success or not content then
-        ShowToast("Failed to read file!", "error")
-        return false
-    end
+    -- Load existing custom words
+    local customWords = LoadCustomWordsFromFile(filePath)
     
     -- Parse words to remove
-    local removeThese = {}
+    local removedWords = {}
     for part in words:gmatch("[^,]+") do
         local word = part:gsub("[%s%c]+", ""):lower()
         if #word >= 2 then
-            removeThese[word] = true
-        end
-    end
-    
-    -- Build new content without removed words
-    local keptWords = {}
-    local removedWords = {}
-    for line in content:gmatch("[^\r\n]+") do
-        local w = line:gsub("[%s%c]+", ""):lower()
-        if #w > 0 then
-            if removeThese[w] then
-                table.insert(removedWords, w)
-            else
-                table.insert(keptWords, w)
+            if customWords[word] then
+                customWords[word] = nil
+                table.insert(removedWords, word)
             end
         end
     end
     
     if #removedWords == 0 then
-        ShowToast("None of the words found in file!", "warning")
+        ShowToast("None of the words found in custom list!", "warning")
         return false
     end
     
-    -- Save new content
-    local newContent = table.concat(keptWords, "\n")
-    pcall(function() writefile(filePath, newContent) end)
-    
-    ShowToast("Removed " .. #removedWords .. " word(s): " .. table.concat(removedWords, ", "), "success")
-    return true
-end
-
--- Helper function to add words to a specific file
-local function AddWordsToFile(filePath, words, isPrimary)
-    if not writefile or not isfile then
-        ShowToast("File writing not supported!", "error")
-        return false
-    end
-    
-    -- Read existing content or create new
-    local existingContent = ""
-    if isfile(filePath) then
-        local success, content = pcall(function() return readfile(filePath) end)
-        if success and content then
-            existingContent = content
-        end
-    end
-    
-    -- Parse existing words into a lookup table
-    local existingWords = {}
-    for line in existingContent:gmatch("[^\r\n]+") do
-        local clean = line:gsub("[%s%c]+", ""):lower()
-        if #clean > 0 then
-            existingWords[clean] = true
-        end
-    end
-    
-    -- Add new words
-    local newWords = {}
-    local addedWords = {}
-    
-    for part in words:gmatch("[^,]+") do
-        local word = part:gsub("[%s%c]+", ""):lower()
-        if #word >= 2 then
-            if not existingWords[word] then
-                table.insert(newWords, word)
-                table.insert(addedWords, word)
-                existingWords[word] = true
-            end
-        end
-    end
-    
-    if #newWords == 0 then
-        ShowToast("No new words to add (all already exist)!", "warning")
-        return false
-    end
-    
-    -- Append to file
-    local newContent = existingContent
-    if newContent ~= "" and not newContent:match("\n$") then
-        newContent = newContent .. "\n"
-    end
-    newContent = newContent .. table.concat(newWords, "\n")
-    
-    local success, err = pcall(function() writefile(filePath, newContent) end)
-    if success then
-        ShowToast("Added " .. #addedWords .. " word(s): " .. table.concat(addedWords, ", "), "success")
-        return true
-    else
-        ShowToast("Failed to save: " .. tostring(err), "error")
-        return false
-    end
+    -- Save updated custom words
+    SaveCustomWordsToFile(filePath, customWords)
+    return true, removedWords
 end
 
 -- =============================================
@@ -1096,7 +1036,7 @@ ViewUsedBtn.Position = UDim2.new(0, 150, 0, 35)
 Instance.new("UICorner", ViewUsedBtn).CornerRadius = UDim.new(0, 4)
 
 local ManageWordsBtn = Instance.new("TextButton", TogglesFrame)
-ManageWordsBtn.Text = "Custom Words"
+ManageWordsBtn.Text = "Add/Remove Words"
 ManageWordsBtn.Font = Enum.Font.GothamMedium
 ManageWordsBtn.TextSize = 11
 ManageWordsBtn.TextColor3 = THEME.Accent
@@ -1531,56 +1471,52 @@ AWRefreshBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWRefreshBtn.Position = UDim2.new(0.52, 0, 0, 150)
 Instance.new("UICorner", AWRefreshBtn).CornerRadius = UDim.new(0, 6)
 
--- Refresh function (reloads everything from files without restart)
--- Refresh function (reloads everything from files without restart)
+-- Reload all word lists
+local function ReloadAllWordLists()
+    -- Reload using fetch functions (web + custom)
+    local primarySuccess, primaryContent = FetchPrimaryWords()
+    LoadPrimaryWords(primaryContent)
+    
+    local fallbackSuccess, fallbackContent = FetchFallbackWords()
+    LoadFallbackWords(fallbackContent)
+    
+    RefreshGiveWordsLookup()
+    
+    -- Rebuild buckets with ALL words
+    Buckets = {}
+    for _, w in ipairs(AllWords) do
+        local c = w:sub(1,1) or ""
+        if c == "" then c = "#" end
+        Buckets[c] = Buckets[c] or {}
+        local exists = false
+        for _, existing in ipairs(Buckets[c]) do
+            if existing == w then exists = true; break end
+        end
+        if not exists then
+            table.insert(Buckets[c], w)
+        end
+    end
+    
+    forceUpdateList = true
+end
+
+-- FullRefresh function
 local function FullRefresh()
     ShowToast("Refreshing word lists...", "warning")
     
-    -- Clear ALL existing data properly
-    local oldAllWords = AllWords
     AllWords = {}
     PrimaryWords = {}
     FallbackWords = {}
     SeenWords = {}
     
-    -- Reload from files (not from web)
-    -- First, reload Primary words from gives_cached.txt
-    if isfile and isfile(givesFileName) then
-        local content = readfile(givesFileName)
-        if content then
-            for w in content:gmatch("[^\r\n]+") do
-                local clean = w:gsub("[%s%c]+", ""):lower()
-                if #clean > 0 and not SeenWords[clean] then
-                    SeenWords[clean] = true
-                    table.insert(PrimaryWords, clean)
-                    table.insert(AllWords, clean)
-                end
-            end
-        end
-    end
+    local primarySuccess, primaryContent = FetchPrimaryWords()
+    LoadPrimaryWords(primaryContent)
     
-    -- Then reload Fallback words from yinglish.txt
-    if isfile and isfile(fileName) then
-        local content = readfile(fileName)
-        if content then
-            for w in content:gmatch("[^\r\n]+") do
-                local clean = w:gsub("[%s%c]+", ""):lower()
-                if #clean > 0 and not SeenWords[clean] then
-                    SeenWords[clean] = true
-                    table.insert(FallbackWords, clean)
-                    table.insert(AllWords, clean)
-                end
-            end
-        end
-    end
+    local fallbackSuccess, fallbackContent = FetchFallbackWords()
+    LoadFallbackWords(fallbackContent)
     
-    -- CRITICAL: Rebuild GiveWordsLookup (this is what determines GIVE vs FALLBACK)
-    GiveWordsLookup = {}
-    for i = 1, #PrimaryWords do
-        GiveWordsLookup[PrimaryWords[i]] = true
-    end
+    RefreshGiveWordsLookup()
     
-    -- Rebuild all buckets
     Buckets = {}
     for _, w in ipairs(AllWords) do
         local c = w:sub(1,1) or ""
@@ -1605,36 +1541,12 @@ local function FullRefresh()
         table.insert(FallbackBuckets[c], w)
     end
     
-    -- Re-add custom words from config if any
-    if Config.CustomWords then
-        for _, w in ipairs(Config.CustomWords) do
-            local clean = w:gsub("[%s%c]+", ""):lower()
-            if #clean > 0 and not SeenWords[clean] then
-                table.insert(AllWords, clean)
-                local c = clean:sub(1,1) or ""
-                if c == "" then c = "#" end
-                Buckets[c] = Buckets[c] or {}
-                local exists = false
-                for _, existing in ipairs(Buckets[c]) do
-                    if existing == clean then exists = true; break end
-                end
-                if not exists then
-                    table.insert(Buckets[c], clean)
-                end
-            end
-        end
-    end
-    
     SeenWords = nil
     
-    -- Force UI update
     forceUpdateList = true
     lastDetected = "---"
-    if UpdateList then
-        UpdateList(lastDetected, lastRequiredLetter)
-    end
+    UpdateList(lastDetected, lastRequiredLetter)
     
-    -- Update status
     StatusText.Text = "Refreshed! " .. #AllWords .. " total words (" .. #PrimaryWords .. " gives, " .. #FallbackWords .. " fallback)"
     StatusText.TextColor3 = THEME.Success
     Tween(StatusDot, {BackgroundColor3 = THEME.Success})
@@ -1647,30 +1559,6 @@ AWRefreshBtn.MouseButton1Click:Connect(function()
     FullRefresh()
 end)
 
--- Reload all word lists
-local function ReloadAllWordLists()
-    LoadFallbackWords()
-    LoadPrimaryWords()
-    RefreshGiveWordsLookup()
-    
-    -- Rebuild buckets
-    Buckets = {}
-    for _, w in ipairs(AllWords) do
-        local c = w:sub(1,1) or ""
-        if c == "" then c = "#" end
-        Buckets[c] = Buckets[c] or {}
-        local exists = false
-        for _, existing in ipairs(Buckets[c]) do
-            if existing == w then exists = true; break end
-        end
-        if not exists then
-            table.insert(Buckets[c], w)
-        end
-    end
-    
-    forceUpdateList = true
-end
-
 -- Add to Fallback only
 AWFallbackAddBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
@@ -1679,13 +1567,10 @@ AWFallbackAddBtn.MouseButton1Click:Connect(function()
         return
     end
     
-    if AddWordsToFile(fileName, words, false) then
-        -- After adding, track with "fallback" type
-        for part in words:gmatch("[^,]+") do
-            local word = part:gsub("[%s%c]+", ""):lower()
-            if #word >= 2 then
-                AddToCustomTracking(word, "fallback")  -- ← CHANGE HERE
-            end
+    local success, addedWords = AddWordsToCustomFile(customFallbackFile, words)
+    if success then
+        for _, word in ipairs(addedWords) do
+            AddToCustomTracking(word, "fallback")
         end
         ReloadAllWordLists()
         AWAddBox.Text = ""
@@ -1700,15 +1585,14 @@ AWBothAddBtn.MouseButton1Click:Connect(function()
         return
     end
     
-    local addedToFallback = AddWordsToFile(fileName, words, false)
-    local addedToGives = AddWordsToFile(givesFileName, words, true)
+    local fallbackSuccess, fallbackAdded = AddWordsToCustomFile(customFallbackFile, words)
+    local givesSuccess, givesAdded = AddWordsToCustomFile(customGivesFile, words)
     
-    if addedToFallback or addedToGives then
-        -- After adding, track with "both" type
+    if fallbackSuccess or givesSuccess then
         for part in words:gmatch("[^,]+") do
             local word = part:gsub("[%s%c]+", ""):lower()
             if #word >= 2 then
-                AddToCustomTracking(word, "both")  -- ← CHANGE HERE
+                AddToCustomTracking(word, "both")
             end
         end
         ReloadAllWordLists()
@@ -1724,13 +1608,10 @@ AWFallbackRemoveBtn.MouseButton1Click:Connect(function()
         return
     end
     
-    if RemoveWordsFromFile(fileName, words) then
-        -- Also remove from tracking if no longer in either file
-        for part in words:gmatch("[^,]+") do
-            local word = part:gsub("[%s%c]+", ""):lower()
-            if #word >= 2 then
-                RemoveFromCustomTracking(word)
-            end
+    local success, removedWords = RemoveWordsFromCustomFile(customFallbackFile, words)
+    if success then
+        for _, word in ipairs(removedWords) do
+            RemoveFromCustomTracking(word)
         end
         ReloadAllWordLists()
         AWAddBox.Text = ""
@@ -1745,11 +1626,10 @@ AWBothRemoveBtn.MouseButton1Click:Connect(function()
         return
     end
     
-    local removedFromFallback = RemoveWordsFromFile(fileName, words)
-    local removedFromGives = RemoveWordsFromFile(givesFileName, words)
+    local fallbackSuccess, fallbackRemoved = RemoveWordsFromCustomFile(customFallbackFile, words)
+    local givesSuccess, givesRemoved = RemoveWordsFromCustomFile(customGivesFile, words)
     
-    if removedFromFallback or removedFromGives then
-        -- Remove from tracking completely
+    if fallbackSuccess or givesSuccess then
         for part in words:gmatch("[^,]+") do
             local word = part:gsub("[%s%c]+", ""):lower()
             if #word >= 2 then
@@ -1768,10 +1648,6 @@ AWAddBox.FocusLost:Connect(function(enter)
     end
 end)
 
--- Update button text
-ManageWordsBtn.Text = "Add/Remove Words"
-ManageWordsBtn.TextColor3 = THEME.Accent
-
 -- Button click handler
 ManageWordsBtn.MouseButton1Click:Connect(function()
     AddWordsFrame.Visible = not AddWordsFrame.Visible
@@ -1783,7 +1659,10 @@ ManageWordsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Replace the ServerFrame with BlacklistFrame
+-- =============================================
+-- BLACKLIST FRAME
+-- =============================================
+
 local BlacklistFrame = Instance.new("Frame", ScreenGui)
 BlacklistFrame.Name = "BlacklistFrame"
 BlacklistFrame.Size = UDim2.new(0, 280, 0, 160)
@@ -1930,11 +1809,6 @@ ServerBrowserBtn.MouseButton1Click:Connect(function()
         BLAddBox:ReleaseFocus()
     end
 end)
-
--- Also make sure the UpdateList function respects the blacklist (it already does)
--- But add a toast when a word is blocked from being used
-local originalGetWordsByPrefix = GetWordsByPrefix or function() end
--- (The blacklist is already checked in the existing UpdateList code with: if not Blacklist[w] ...)
 
 -- =============================================
 -- WORD BROWSER
@@ -2735,24 +2609,7 @@ runConn = RunService.Heartbeat:Connect(function()
             end
         end
 
-        local seconds = nil
-        if isVisible then
-            local circle = frame and frame:FindFirstChild("Circle")
-            local timerLbl = circle and circle:FindFirstChild("Timer") and circle.Timer:FindFirstChild("Seconds")
-            if timerLbl then
-                local timeText = timerLbl.Text
-                seconds = tonumber(timeText:match("([%d%.]+)"))
-                StatsData.Frame.Visible = true
-                StatsData.Timer.Text = timeText
-                if seconds and seconds < 3 then
-                    StatsData.Timer.TextColor3 = Color3.fromRGB(255, 80, 80)
-                else
-                    StatsData.Timer.TextColor3 = THEME.Text
-                end
-            end
-        else
-            StatsData.Frame.Visible = false
-        end
+        -- Timer removed
 
         local isMyTurn, requiredLetter = GetTurnInfo(frame)
 
@@ -2768,7 +2625,7 @@ runConn = RunService.Heartbeat:Connect(function()
             UsedWords = {}
             StatusText.Text = "New Round - Words Reset"
             StatusText.TextColor3 = THEME.Success
-            cachedCensored = false  -- Reset censored state on new round
+            cachedCensored = false
         end
         lastTypeVisible = typeVisible
 
@@ -2789,14 +2646,12 @@ runConn = RunService.Heartbeat:Connect(function()
                 StatusText.TextColor3 = THEME.Warning
                 Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
                 for _, btn in ipairs(ButtonCache) do btn.Visible = false end
-                StatsData.Count.Text = "Words: 0"
             end
             listUpdatePending = false
             forceUpdateList = false
             currentBestMatch = nil
             lastDetected = detected
             lastRequiredLetter = requiredLetter
-            -- DO NOT RETURN - let search box still work
         end
 
         if listUpdatePending and (now - lastInputTime > LIST_DEBOUNCE) then
@@ -2804,7 +2659,6 @@ runConn = RunService.Heartbeat:Connect(function()
             UpdateList(lastDetected, lastRequiredLetter)
             local visCount = 0
             for _, b in ipairs(ButtonCache) do if b.Visible then visCount = visCount + 1 end end
-            StatsData.Count.Text = "Words: " .. visCount .. "+"
         end
 
         if not isVisible then
@@ -2813,12 +2667,10 @@ runConn = RunService.Heartbeat:Connect(function()
                 StatusText.TextColor3 = THEME.SubText
                 Tween(StatusDot, {BackgroundColor3 = THEME.SubText})
                 for _, btn in ipairs(ButtonCache) do btn.Visible = false end
-                StatsData.Count.Text = "Words: 0"
             end
             lastDetected = "---"
-            cachedCensored = false  -- Reset censored state when leaving round
+            cachedCensored = false
         elseif detected ~= lastDetected or requiredLetter ~= lastRequiredLetter or forceUpdateList then
-            -- Only update if not censored OR if we're forcing an update
             if not censored or forceUpdateList then
                 currentBestMatch = nil
                 lastDetected = detected
@@ -2832,9 +2684,7 @@ runConn = RunService.Heartbeat:Connect(function()
                     listUpdatePending = false
                     local visCount = 0
                     for _, b in ipairs(ButtonCache) do if b.Visible then visCount = visCount + 1 end end
-                    StatsData.Count.Text = "Words: " .. visCount .. "+"
                 else
-                    -- Add this to your heartbeat loop where detected word is processed:
                     if detected ~= "" then
                         local isCompleted = false
                         if #detected > 2 then
@@ -2852,7 +2702,7 @@ runConn = RunService.Heartbeat:Connect(function()
                             StatusText.Text = "Completed: " .. detected .. " <font color=\"rgb(100,255,140)\">✓</font>"
                             StatusText.TextColor3 = THEME.Success
                             Tween(StatusDot, {BackgroundColor3 = THEME.Success})
-                            lastManualInput = detected  -- Store the completed word
+                            lastManualInput = detected
                         else
                             StatusText.Text = "Input: " .. detected
                             StatusText.TextColor3 = THEME.Accent
@@ -2860,7 +2710,6 @@ runConn = RunService.Heartbeat:Connect(function()
                         end
                     end
 
-                    -- And add this check somewhere in the heartbeat loop (after the above):
                     if lastManualInput ~= "" and (detected == "" or #detected < #lastManualInput) then
                         UsedWords[lastManualInput] = tick()
                         ShowToast("Added to used words: " .. lastManualInput, "success")
