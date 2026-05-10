@@ -1272,8 +1272,8 @@ RefreshCustomWords()
 -- Replace the ServerFrame with BlacklistFrame
 local BlacklistFrame = Instance.new("Frame", ScreenGui)
 BlacklistFrame.Name = "BlacklistFrame"
-BlacklistFrame.Size = UDim2.new(0, 250, 0, 120)
-BlacklistFrame.Position = UDim2.new(0.5, -125, 0.5, -60)
+BlacklistFrame.Size = UDim2.new(0, 280, 0, 160)
+BlacklistFrame.Position = UDim2.new(0.5, -140, 0.5, -80)
 BlacklistFrame.BackgroundColor3 = THEME.Background
 BlacklistFrame.Visible = false
 BlacklistFrame.ClipsDescendants = true
@@ -1341,7 +1341,7 @@ BLAddBtn.TextSize = 12
 BLAddBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
 BLAddBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 BLAddBtn.Size = UDim2.new(0.48, -10, 0, 30)
-BLAddBtn.Position = UDim2.new(0, 10, 1, -35)
+BLAddBtn.Position = UDim2.new(0, 10, 0, 105)
 Instance.new("UICorner", BLAddBtn).CornerRadius = UDim.new(0, 6)
 
 -- Unblacklist button
@@ -1352,7 +1352,7 @@ BLRemoveBtn.TextSize = 12
 BLRemoveBtn.BackgroundColor3 = THEME.ItemBG
 BLRemoveBtn.TextColor3 = THEME.Success
 BLRemoveBtn.Size = UDim2.new(0.48, -10, 0, 30)
-BLRemoveBtn.Position = UDim2.new(0.52, 0, 1, -35)
+BLRemoveBtn.Position = UDim2.new(0.52, 0, 0, 105)
 Instance.new("UICorner", BLRemoveBtn).CornerRadius = UDim.new(0, 6)
 
 -- Add word to blacklist
