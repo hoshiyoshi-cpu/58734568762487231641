@@ -120,6 +120,7 @@ local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
 local fileName = "yinglish.txt"
 local givesFileName = "gives_cached.txt"
+local CustomAddedFile = "customadded.txt"
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -392,6 +393,192 @@ local function GetMatchLength(str, prefix)
         end
     end
     return len
+end
+
+local function LoadCustomAddedWords()
+    local loaded = {}
+    if isfile and isfile(CustomAddedFile) then
+        local success, content = pcall(function() return readfile(CustomAddedFile) end)
+        if success and content then
+            for line in content:gmatch("[^\r\n]+") do
+                local word = line:gsub("[%s%c]+", ""):lower()
+                if #word > 0 then
+                    loaded[word] = true
+                end
+            end
+        end
+    end
+    return loaded
+end
+
+-- Save custom added word to tracking file
+local function AddToCustomTracking(word)
+    if not writefile then return end
+    local existing = {}
+    if isfile(CustomAddedFile) then
+        local success, content = pcall(function() return readfile(CustomAddedFile) end)
+        if success and content then
+            for line in content:gmatch("[^\r\n]+") do
+                local w = line:gsub("[%s%c]+", ""):lower()
+                if #w > 0 then
+                    existing[w] = true
+                end
+            end
+        end
+    end
+    
+    if not existing[word] then
+        local content = ""
+        if isfile(CustomAddedFile) then
+            content = readfile(CustomAddedFile)
+            if content ~= "" and not content:match("\n$") then
+                content = content .. "\n"
+            end
+        end
+        content = content .. word
+        pcall(function() writefile(CustomAddedFile, content) end)
+    end
+end
+
+-- Remove word from tracking file
+local function RemoveFromCustomTracking(word)
+    if not writefile or not isfile then return end
+    if not isfile(CustomAddedFile) then return end
+    
+    local words = {}
+    local success, content = pcall(function() return readfile(CustomAddedFile) end)
+    if success and content then
+        for line in content:gmatch("[^\r\n]+") do
+            local w = line:gsub("[%s%c]+", ""):lower()
+            if #w > 0 and w ~= word then
+                table.insert(words, w)
+            end
+        end
+    end
+    
+    local newContent = table.concat(words, "\n")
+    pcall(function() writefile(CustomAddedFile, newContent) end)
+end
+
+-- Helper function to remove words from a specific file
+local function RemoveWordsFromFile(filePath, words)
+    if not writefile or not isfile then
+        ShowToast("File writing not supported!", "error")
+        return false
+    end
+    
+    if not isfile(filePath) then
+        ShowToast("File not found!", "warning")
+        return false
+    end
+    
+    -- Read existing content
+    local success, content = pcall(function() return readfile(filePath) end)
+    if not success or not content then
+        ShowToast("Failed to read file!", "error")
+        return false
+    end
+    
+    -- Parse words to remove
+    local removeThese = {}
+    for part in words:gmatch("[^,]+") do
+        local word = part:gsub("[%s%c]+", ""):lower()
+        if #word >= 2 then
+            removeThese[word] = true
+        end
+    end
+    
+    -- Build new content without removed words
+    local keptWords = {}
+    local removedWords = {}
+    for line in content:gmatch("[^\r\n]+") do
+        local w = line:gsub("[%s%c]+", ""):lower()
+        if #w > 0 then
+            if removeThese[w] then
+                table.insert(removedWords, w)
+            else
+                table.insert(keptWords, w)
+            end
+        end
+    end
+    
+    if #removedWords == 0 then
+        ShowToast("None of the words found in file!", "warning")
+        return false
+    end
+    
+    -- Save new content
+    local newContent = table.concat(keptWords, "\n")
+    pcall(function() writefile(filePath, newContent) end)
+    
+    ShowToast("Removed " .. #removedWords .. " word(s): " .. table.concat(removedWords, ", "), "success")
+    return true
+end
+
+-- Helper function to add words to a specific file
+local function AddWordsToFile(filePath, words, isPrimary)
+    if not writefile or not isfile then
+        ShowToast("File writing not supported!", "error")
+        return false
+    end
+    
+    -- Read existing content or create new
+    local existingContent = ""
+    if isfile(filePath) then
+        local success, content = pcall(function() return readfile(filePath) end)
+        if success and content then
+            existingContent = content
+        end
+    end
+    
+    -- Parse existing words into a lookup table
+    local existingWords = {}
+    for line in existingContent:gmatch("[^\r\n]+") do
+        local clean = line:gsub("[%s%c]+", ""):lower()
+        if #clean > 0 then
+            existingWords[clean] = true
+        end
+    end
+    
+    -- Add new words
+    local newWords = {}
+    local addedWords = {}
+    
+    for part in words:gmatch("[^,]+") do
+        local word = part:gsub("[%s%c]+", ""):lower()
+        if #word >= 2 then
+            if not existingWords[word] then
+                table.insert(newWords, word)
+                table.insert(addedWords, word)
+                existingWords[word] = true
+            end
+        end
+    end
+    
+    if #newWords == 0 then
+        ShowToast("No new words to add (all already exist)!", "warning")
+        return false
+    end
+    
+    -- Append to file
+    local newContent = existingContent
+    if newContent ~= "" and not newContent:match("\n$") then
+        newContent = newContent .. "\n"
+    end
+    newContent = newContent .. table.concat(newWords, "\n")
+    
+    local success, err = pcall(function() writefile(filePath, newContent) end)
+    if success then
+        -- Track custom added words
+        for _, word in ipairs(addedWords) do
+            AddToCustomTracking(word)
+        end
+        ShowToast("Added " .. #addedWords .. " word(s): " .. table.concat(addedWords, ", "), "success")
+        return true
+    else
+        ShowToast("Failed to save: " .. tostring(err), "error")
+        return false
+    end
 end
 
 -- =============================================
@@ -1122,11 +1309,10 @@ end)
 -- CUSTOM WORDS FRAME
 -- =============================================
 
--- Create Add Words Frame
 local AddWordsFrame = Instance.new("Frame", ScreenGui)
 AddWordsFrame.Name = "AddWordsFrame"
-AddWordsFrame.Size = UDim2.new(0, 320, 0, 160)
-AddWordsFrame.Position = UDim2.new(0.5, -160, 0.5, -80)
+AddWordsFrame.Size = UDim2.new(0, 340, 0, 230)
+AddWordsFrame.Position = UDim2.new(0.5, -170, 0.5, -115)
 AddWordsFrame.BackgroundColor3 = THEME.Background
 AddWordsFrame.Visible = false
 AddWordsFrame.ClipsDescendants = true
@@ -1138,7 +1324,7 @@ AWStroke.Transparency = 0.3
 AWStroke.Thickness = 2
 
 local AWHeader = Instance.new("TextLabel", AddWordsFrame)
-AWHeader.Text = "Add Words"
+AWHeader.Text = "Add/Remove Words"
 AWHeader.Font = Enum.Font.GothamBold
 AWHeader.TextSize = 16
 AWHeader.TextColor3 = THEME.Accent
@@ -1166,7 +1352,7 @@ AWInstructions.Position = UDim2.new(0, 10, 0, 40)
 AWInstructions.BackgroundTransparency = 1
 AWInstructions.TextXAlignment = Enum.TextXAlignment.Left
 
--- Word input box (multi-line support)
+-- Word input box
 local AWAddBox = Instance.new("TextBox", AddWordsFrame)
 AWAddBox.Font = Enum.Font.Gotham
 AWAddBox.TextSize = 12
@@ -1183,92 +1369,93 @@ AWAddBox.TextWrapped = true
 AWAddBox.TextXAlignment = Enum.TextXAlignment.Left
 AWAddBox.TextYAlignment = Enum.TextYAlignment.Top
 
+-- ===== ADD BUTTONS (Top row) =====
 -- Add to Fallback button
-local AWFallbackBtn = Instance.new("TextButton", AddWordsFrame)
-AWFallbackBtn.Text = "Add to Fallback"
-AWFallbackBtn.Font = Enum.Font.GothamBold
-AWFallbackBtn.TextSize = 12
-AWFallbackBtn.BackgroundColor3 = THEME.ItemBG
-AWFallbackBtn.TextColor3 = THEME.Warning
-AWFallbackBtn.Size = UDim2.new(0.48, -10, 0, 30)
-AWFallbackBtn.Position = UDim2.new(0, 10, 1, -35)
-Instance.new("UICorner", AWFallbackBtn).CornerRadius = UDim.new(0, 6)
+local AWFallbackAddBtn = Instance.new("TextButton", AddWordsFrame)
+AWFallbackAddBtn.Text = "+ Fallback"
+AWFallbackAddBtn.Font = Enum.Font.GothamBold
+AWFallbackAddBtn.TextSize = 11
+AWFallbackAddBtn.BackgroundColor3 = THEME.ItemBG
+AWFallbackAddBtn.TextColor3 = THEME.Warning
+AWFallbackAddBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWFallbackAddBtn.Position = UDim2.new(0, 10, 0, 115)
+Instance.new("UICorner", AWFallbackAddBtn).CornerRadius = UDim.new(0, 6)
 
 -- Add to Both button
-local AWBothBtn = Instance.new("TextButton", AddWordsFrame)
-AWBothBtn.Text = "Add to Fallback + Gives"
-AWBothBtn.Font = Enum.Font.GothamBold
-AWBothBtn.TextSize = 11
-AWBothBtn.BackgroundColor3 = THEME.Accent
-AWBothBtn.TextColor3 = THEME.Text
-AWBothBtn.Size = UDim2.new(0.48, -10, 0, 30)
-AWBothBtn.Position = UDim2.new(0.52, 0, 1, -35)
-Instance.new("UICorner", AWBothBtn).CornerRadius = UDim.new(0, 6)
+local AWBothAddBtn = Instance.new("TextButton", AddWordsFrame)
+AWBothAddBtn.Text = "+ Both (F+B)"
+AWBothAddBtn.Font = Enum.Font.GothamBold
+AWBothAddBtn.TextSize = 11
+AWBothAddBtn.BackgroundColor3 = THEME.Accent
+AWBothAddBtn.TextColor3 = THEME.Text
+AWBothAddBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWBothAddBtn.Position = UDim2.new(0.34, 0, 0, 115)
+Instance.new("UICorner", AWBothAddBtn).CornerRadius = UDim.new(0, 6)
 
--- Helper function to add words to a specific file
-local function AddWordsToFile(filePath, words, isPrimary)
-    if not writefile or not isfile then
-        ShowToast("File writing not supported!", "error")
-        return false
-    end
+-- ===== REMOVE BUTTONS (Bottom row) =====
+-- Remove from Fallback button
+local AWFallbackRemoveBtn = Instance.new("TextButton", AddWordsFrame)
+AWFallbackRemoveBtn.Text = "- Fallback"
+AWFallbackRemoveBtn.Font = Enum.Font.GothamBold
+AWFallbackRemoveBtn.TextSize = 11
+AWFallbackRemoveBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
+AWFallbackRemoveBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+AWFallbackRemoveBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWFallbackRemoveBtn.Position = UDim2.new(0, 10, 0, 150)
+Instance.new("UICorner", AWFallbackRemoveBtn).CornerRadius = UDim.new(0, 6)
+
+-- Remove from Both button
+local AWBothRemoveBtn = Instance.new("TextButton", AddWordsFrame)
+AWBothRemoveBtn.Text = "- Both (F+B)"
+AWBothRemoveBtn.Font = Enum.Font.GothamBold
+AWBothRemoveBtn.TextSize = 11
+AWBothRemoveBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
+AWBothRemoveBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+AWBothRemoveBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWBothRemoveBtn.Position = UDim2.new(0.34, 0, 0, 150)
+Instance.new("UICorner", AWBothRemoveBtn).CornerRadius = UDim.new(0, 6)
+
+-- Clear input button
+local AWClearBtn = Instance.new("TextButton", AddWordsFrame)
+AWClearBtn.Text = "Clear"
+AWClearBtn.Font = Enum.Font.GothamBold
+AWClearBtn.TextSize = 11
+AWClearBtn.BackgroundColor3 = THEME.ItemBG
+AWClearBtn.TextColor3 = THEME.SubText
+AWClearBtn.Size = UDim2.new(0.32, -5, 0, 30)
+AWClearBtn.Position = UDim2.new(0.68, 0, 0, 115)
+Instance.new("UICorner", AWClearBtn).CornerRadius = UDim.new(0, 6)
+AWClearBtn.MouseButton1Click:Connect(function()
+    AWAddBox.Text = ""
+    AWAddBox:ReleaseFocus()
+end)
+
+-- Reload all word lists
+local function ReloadAllWordLists()
+    LoadFallbackWords()
+    LoadPrimaryWords()
+    RefreshGiveWordsLookup()
     
-    -- Read existing content or create new
-    local existingContent = ""
-    if isfile(filePath) then
-        local success, content = pcall(function() return readfile(filePath) end)
-        if success and content then
-            existingContent = content
+    -- Rebuild buckets
+    Buckets = {}
+    for _, w in ipairs(AllWords) do
+        local c = w:sub(1,1) or ""
+        if c == "" then c = "#" end
+        Buckets[c] = Buckets[c] or {}
+        local exists = false
+        for _, existing in ipairs(Buckets[c]) do
+            if existing == w then exists = true; break end
+        end
+        if not exists then
+            table.insert(Buckets[c], w)
         end
     end
     
-    -- Parse existing words into a lookup table
-    local existingWords = {}
-    for line in existingContent:gmatch("[^\r\n]+") do
-        local clean = line:gsub("[%s%c]+", ""):lower()
-        if #clean > 0 then
-            existingWords[clean] = true
-        end
-    end
-    
-    -- Add new words
-    local newWords = {}
-    local addedWords = {}
-    
-    for part in words:gmatch("[^,]+") do
-        local word = part:gsub("[%s%c]+", ""):lower()
-        if #word >= 2 then
-            if not existingWords[word] then
-                table.insert(newWords, word)
-                table.insert(addedWords, word)
-                existingWords[word] = true
-            end
-        end
-    end
-    
-    if #newWords == 0 then
-        ShowToast("No new words to add (all already exist)!", "warning")
-        return false
-    end
-    
-    -- Append to file
-    local newContent = existingContent
-    if newContent ~= "" and not newContent:match("\n$") then
-        newContent = newContent .. "\n"
-    end
-    newContent = newContent .. table.concat(newWords, "\n")
-    
-    local success, err = pcall(function() writefile(filePath, newContent) end)
-    if success then
-        ShowToast("Added " .. #addedWords .. " word(s): " .. table.concat(addedWords, ", "), "success")
-        return true
-    else
-        ShowToast("Failed to save: " .. tostring(err), "error")
-        return false
-    end
+    forceUpdateList = true
 end
 
 -- Add to Fallback only
-AWFallbackBtn.MouseButton1Click:Connect(function()
+AWFallbackAddBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
     if words == "" or words == "word1, word2, word3..." then
         ShowToast("Enter some words first!", "warning")
@@ -1276,32 +1463,13 @@ AWFallbackBtn.MouseButton1Click:Connect(function()
     end
     
     if AddWordsToFile(fileName, words, false) then
-        -- Reload fallback words to include new ones
-        LoadFallbackWords()
-        RefreshGiveWordsLookup()
-        
-        -- Rebuild buckets with new words
-        for _, w in ipairs(FallbackWords) do
-            local c = w:sub(1,1) or ""
-            if c == "" then c = "#" end
-            if not Buckets[c] then Buckets[c] = {} end
-            -- Avoid duplicates
-            local exists = false
-            for _, existing in ipairs(Buckets[c]) do
-                if existing == w then exists = true; break end
-            end
-            if not exists then
-                table.insert(Buckets[c], w)
-            end
-        end
-        
+        ReloadAllWordLists()
         AWAddBox.Text = ""
-        forceUpdateList = true
     end
 end)
 
--- Add to Both (Fallback + Gives)
-AWBothBtn.MouseButton1Click:Connect(function()
+-- Add to Both
+AWBothAddBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
     if words == "" or words == "word1, word2, word3..." then
         ShowToast("Enter some words first!", "warning")
@@ -1312,39 +1480,68 @@ AWBothBtn.MouseButton1Click:Connect(function()
     local addedToGives = AddWordsToFile(givesFileName, words, true)
     
     if addedToFallback or addedToGives then
-        -- Reload both word lists
-        LoadFallbackWords()
-        LoadPrimaryWords()
-        RefreshGiveWordsLookup()
-        
-        -- Rebuild buckets with new words from both sources
-        Buckets = {}
-        for _, w in ipairs(AllWords) do
-            local c = w:sub(1,1) or ""
-            if c == "" then c = "#" end
-            Buckets[c] = Buckets[c] or {}
-            local exists = false
-            for _, existing in ipairs(Buckets[c]) do
-                if existing == w then exists = true; break end
-            end
-            if not exists then
-                table.insert(Buckets[c], w)
+        ReloadAllWordLists()
+        AWAddBox.Text = ""
+    end
+end)
+
+-- Remove from Fallback only
+AWFallbackRemoveBtn.MouseButton1Click:Connect(function()
+    local words = AWAddBox.Text
+    if words == "" or words == "word1, word2, word3..." then
+        ShowToast("Enter words to remove!", "warning")
+        return
+    end
+    
+    if RemoveWordsFromFile(fileName, words) then
+        -- Also remove from tracking if no longer in either file
+        for part in words:gmatch("[^,]+") do
+            local word = part:gsub("[%s%c]+", ""):lower()
+            if #word >= 2 then
+                RemoveFromCustomTracking(word)
             end
         end
-        
+        ReloadAllWordLists()
         AWAddBox.Text = ""
-        forceUpdateList = true
+    end
+end)
+
+-- Remove from Both
+AWBothRemoveBtn.MouseButton1Click:Connect(function()
+    local words = AWAddBox.Text
+    if words == "" or words == "word1, word2, word3..." then
+        ShowToast("Enter words to remove!", "warning")
+        return
+    end
+    
+    local removedFromFallback = RemoveWordsFromFile(fileName, words)
+    local removedFromGives = RemoveWordsFromFile(givesFileName, words)
+    
+    if removedFromFallback or removedFromGives then
+        -- Remove from tracking completely
+        for part in words:gmatch("[^,]+") do
+            local word = part:gsub("[%s%c]+", ""):lower()
+            if #word >= 2 then
+                RemoveFromCustomTracking(word)
+            end
+        end
+        ReloadAllWordLists()
+        AWAddBox.Text = ""
     end
 end)
 
 -- Enter key support (adds to both as default)
 AWAddBox.FocusLost:Connect(function(enter)
     if enter then
-        AWBothBtn.MouseButton1Click:Fire()
+        AWBothAddBtn.MouseButton1Click:Fire()
     end
 end)
 
--- Button click handler (replaces the old Custom Words button)
+-- Update button text
+ManageWordsBtn.Text = "Add/Remove Words"
+ManageWordsBtn.TextColor3 = THEME.Accent
+
+-- Button click handler
 ManageWordsBtn.MouseButton1Click:Connect(function()
     AddWordsFrame.Visible = not AddWordsFrame.Visible
     AddWordsFrame.Parent = nil
