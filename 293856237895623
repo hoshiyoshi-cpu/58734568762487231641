@@ -942,13 +942,6 @@ for word, _ in pairs(fileBlacklist) do
     Blacklist[word] = true
 end
 
--- Also add any from Config.TrapPrefixes for backward compatibility
-if Config.TrapPrefixes then
-    for _, word in ipairs(Config.TrapPrefixes) do
-        Blacklist[word] = true
-    end
-end
-
 local RefreshUsedWords
 local lastRefreshHash = ""
 
@@ -1286,8 +1279,8 @@ RefreshCustomWords()
 -- Replace the ServerFrame with BlacklistFrame
 local BlacklistFrame = Instance.new("Frame", ScreenGui)
 BlacklistFrame.Name = "BlacklistFrame"
-BlacklistFrame.Size = UDim2.new(0, 300, 0, 400)
-BlacklistFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+BlacklistFrame.Size = UDim2.new(0, 250, 0, 120)
+BlacklistFrame.Position = UDim2.new(0.5, -125, 0.5, -60)
 BlacklistFrame.BackgroundColor3 = THEME.Background
 BlacklistFrame.Visible = false
 BlacklistFrame.ClipsDescendants = true
@@ -1303,7 +1296,7 @@ BLHeader.Text = "Blacklist Manager"
 BLHeader.Font = Enum.Font.GothamBold
 BLHeader.TextSize = 16
 BLHeader.TextColor3 = Color3.fromRGB(255, 100, 100)
-BLHeader.Size = UDim2.new(1, 0, 0, 40)
+BLHeader.Size = UDim2.new(1, 0, 0, 35)
 BLHeader.BackgroundTransparency = 1
 
 local BLClose = Instance.new("TextButton", BlacklistFrame)
@@ -1311,126 +1304,63 @@ BLClose.Text = "X"
 BLClose.Font = Enum.Font.GothamBold
 BLClose.TextSize = 16
 BLClose.TextColor3 = Color3.fromRGB(255, 100, 100)
-BLClose.Size = UDim2.new(0, 40, 0, 40)
-BLClose.Position = UDim2.new(1, -40, 0, 0)
+BLClose.Size = UDim2.new(0, 35, 0, 35)
+BLClose.Position = UDim2.new(1, -35, 0, 0)
 BLClose.BackgroundTransparency = 1
 BLClose.MouseButton1Click:Connect(function() BlacklistFrame.Visible = false end)
 
--- Count label
+-- Count label (just shows number, no list)
 local BLCountLabel = Instance.new("TextLabel", BlacklistFrame)
 BLCountLabel.Font = Enum.Font.Gotham
-BLCountLabel.TextSize = 12
+BLCountLabel.TextSize = 11
 BLCountLabel.TextColor3 = THEME.SubText
 BLCountLabel.Size = UDim2.new(1, -20, 0, 20)
-BLCountLabel.Position = UDim2.new(0, 10, 0, 45)
+BLCountLabel.Position = UDim2.new(0, 10, 0, 40)
 BLCountLabel.BackgroundTransparency = 1
 BLCountLabel.TextXAlignment = Enum.TextXAlignment.Left
-BLCountLabel.Text = "0 blacklisted words"
 
--- Add word section
+local function UpdateCountLabel()
+    local count = 0
+    for _ in pairs(Blacklist) do count = count + 1 end
+    BLCountLabel.Text = count .. " words blacklisted (check file to see them)"
+end
+UpdateCountLabel()
+
+-- Word input box
 local BLAddBox = Instance.new("TextBox", BlacklistFrame)
 BLAddBox.Font = Enum.Font.Gotham
 BLAddBox.TextSize = 12
 BLAddBox.BackgroundColor3 = THEME.ItemBG
 BLAddBox.Size = UDim2.new(1, -20, 0, 30)
-BLAddBox.Position = UDim2.new(0, 10, 0, 70)
+BLAddBox.Position = UDim2.new(0, 10, 0, 65)
 Instance.new("UICorner", BLAddBox).CornerRadius = UDim.new(0, 6)
-BLAddBox.PlaceholderText = "Enter word to blacklist..."
+BLAddBox.PlaceholderText = "Enter word..."
 BLAddBox.PlaceholderColor3 = THEME.SubText
 BLAddBox.TextColor3 = THEME.Text
 BLAddBox.Text = ""
 BLAddBox.ClearTextOnFocus = false
 
+-- Blacklist button
 local BLAddBtn = Instance.new("TextButton", BlacklistFrame)
 BLAddBtn.Text = "Blacklist"
 BLAddBtn.Font = Enum.Font.GothamBold
 BLAddBtn.TextSize = 12
 BLAddBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
 BLAddBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-BLAddBtn.Size = UDim2.new(1, -20, 0, 30)
-BLAddBtn.Position = UDim2.new(0, 10, 0, 105)
+BLAddBtn.Size = UDim2.new(0.48, -10, 0, 30)
+BLAddBtn.Position = UDim2.new(0, 10, 1, -35)
 Instance.new("UICorner", BLAddBtn).CornerRadius = UDim.new(0, 6)
 
--- Search box
-local BLSearchBox = Instance.new("TextBox", BlacklistFrame)
-BLSearchBox.Font = Enum.Font.Gotham
-BLSearchBox.TextSize = 12
-BLSearchBox.BackgroundColor3 = THEME.ItemBG
-BLSearchBox.Size = UDim2.new(1, -20, 0, 24)
-BLSearchBox.Position = UDim2.new(0, 10, 0, 145)
-Instance.new("UICorner", BLSearchBox).CornerRadius = UDim.new(0, 4)
-BLSearchBox.PlaceholderText = "Search blacklist..."
-BLSearchBox.PlaceholderColor3 = THEME.SubText
-BLSearchBox.TextColor3 = THEME.Text
-BLSearchBox.Text = ""
-BLSearchBox.ClearTextOnFocus = false
-
--- List of blacklisted words
-local BLList = Instance.new("ScrollingFrame", BlacklistFrame)
-BLList.Size = UDim2.new(1, -20, 1, -210)
-BLList.Position = UDim2.new(0, 10, 0, 175)
-BLList.BackgroundTransparency = 1
-BLList.ScrollBarThickness = 3
-BLList.ScrollBarImageColor3 = Color3.fromRGB(255, 100, 100)
-
-local BLListLayout = Instance.new("UIListLayout", BLList)
-BLListLayout.Padding = UDim.new(0, 2)
-BLListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
--- Refresh blacklist display
-local function RefreshBlacklistDisplay()
-    for _, c in ipairs(BLList:GetChildren()) do
-        if c:IsA("Frame") then c:Destroy() end
-    end
-    
-    local query = BLSearchBox.Text:lower():gsub("[%s%c]+", "")
-    local blacklistedWords = {}
-    for word, _ in pairs(Blacklist) do
-        table.insert(blacklistedWords, word)
-    end
-    table.sort(blacklistedWords)
-    
-    local shownCount = 0
-    for i, word in ipairs(blacklistedWords) do
-        if query == "" or word:find(query, 1, true) then
-            shownCount = shownCount + 1
-            local row = Instance.new("Frame", BLList)
-            row.Size = UDim2.new(1, -6, 0, 26)
-            row.BackgroundColor3 = (shownCount % 2 == 0) and Color3.fromRGB(25, 25, 30) or Color3.fromRGB(30, 30, 35)
-            row.BorderSizePixel = 0
-            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
-            
-            local lbl = Instance.new("TextLabel", row)
-            lbl.Text = word
-            lbl.Font = Enum.Font.Gotham
-            lbl.TextSize = 12
-            lbl.TextColor3 = Color3.fromRGB(255, 120, 120)
-            lbl.Size = UDim2.new(1, -35, 1, 0)
-            lbl.Position = UDim2.new(0, 8, 0, 0)
-            lbl.BackgroundTransparency = 1
-            lbl.TextXAlignment = Enum.TextXAlignment.Left
-            
-            local unblacklist = Instance.new("TextButton", row)
-            unblacklist.Text = "✓"
-            unblacklist.Font = Enum.Font.GothamBold
-            unblacklist.TextSize = 14
-            unblacklist.TextColor3 = THEME.Success
-            unblacklist.Size = UDim2.new(0, 26, 1, 0)
-            unblacklist.Position = UDim2.new(1, -26, 0, 0)
-            unblacklist.BackgroundTransparency = 1
-            unblacklist.MouseButton1Click:Connect(function()
-                Blacklist[word] = nil
-                SaveBlacklistToFile()
-                RefreshBlacklistDisplay()
-                forceUpdateList = true
-                ShowToast("Removed from blacklist: " .. word, "success")
-            end)
-        end
-    end
-    
-    BLCountLabel.Text = #blacklistedWords .. " blacklisted words"
-    BLList.CanvasSize = UDim2.new(0, 0, 0, shownCount * 28)
-end
+-- Unblacklist button
+local BLRemoveBtn = Instance.new("TextButton", BlacklistFrame)
+BLRemoveBtn.Text = "Unblacklist"
+BLRemoveBtn.Font = Enum.Font.GothamBold
+BLRemoveBtn.TextSize = 12
+BLRemoveBtn.BackgroundColor3 = THEME.ItemBG
+BLRemoveBtn.TextColor3 = THEME.Success
+BLRemoveBtn.Size = UDim2.new(0.48, -10, 0, 30)
+BLRemoveBtn.Position = UDim2.new(0.52, 0, 1, -35)
+Instance.new("UICorner", BLRemoveBtn).CornerRadius = UDim.new(0, 6)
 
 -- Add word to blacklist
 BLAddBtn.MouseButton1Click:Connect(function()
@@ -1449,36 +1379,48 @@ BLAddBtn.MouseButton1Click:Connect(function()
     SaveBlacklistToFile()
     BLAddBox.Text = ""
     BLAddBox:ReleaseFocus()
-    RefreshBlacklistDisplay()
+    UpdateCountLabel()
     forceUpdateList = true
     ShowToast("Blacklisted: " .. word, "error")
 end)
 
--- Enter key support
+-- Remove word from blacklist
+BLRemoveBtn.MouseButton1Click:Connect(function()
+    local word = BLAddBox.Text:lower():gsub("[%s%c]+", "")
+    if #word < 2 then
+        ShowToast("Enter a word to remove!", "warning")
+        return
+    end
+    
+    if not Blacklist[word] then
+        ShowToast("Word not in blacklist!", "warning")
+        return
+    end
+    
+    Blacklist[word] = nil
+    SaveBlacklistToFile()
+    BLAddBox.Text = ""
+    UpdateCountLabel()
+    forceUpdateList = true
+    ShowToast("Removed from blacklist: " .. word, "success")
+end)
+
+-- Enter key support - adds word
 BLAddBox.FocusLost:Connect(function(enter)
     if enter then
         BLAddBtn.MouseButton1Click:Fire()
     end
 end)
 
--- Search functionality
-BLSearchBox:GetPropertyChangedSignal("Text"):Connect(RefreshBlacklistDisplay)
-
--- Refresh on visibility
-local lastBlacklistRefresh = 0
-BlacklistFrame:GetPropertyChangedSignal("Visible"):Connect(function()
-    if BlacklistFrame.Visible then
-        RefreshBlacklistDisplay()
-    end
-end)
-
--- Replace the button click handler
+-- Button click handler
 ServerBrowserBtn.MouseButton1Click:Connect(function()
     BlacklistFrame.Visible = not BlacklistFrame.Visible
     BlacklistFrame.Parent = nil
     BlacklistFrame.Parent = ScreenGui
     if BlacklistFrame.Visible then 
-        RefreshBlacklistDisplay()
+        UpdateCountLabel()
+        BLAddBox.Text = ""
+        BLAddBox:ReleaseFocus()
     end
 end)
 
