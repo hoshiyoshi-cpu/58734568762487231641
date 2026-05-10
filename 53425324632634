@@ -903,7 +903,7 @@ local UWLayout = Instance.new("UIListLayout", UWList)
 UWLayout.Padding = UDim.new(0, 2)
 UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local BlacklistFile = "blacklist.txt"
+local BlacklistFile = "C:\\Users\\USER\\AppData\\Local\\Xeno\\workspace\\blacklist.txt"
 
 -- Load blacklist from file
 local function LoadBlacklistFromFile()
