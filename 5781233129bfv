@@ -474,6 +474,17 @@ local function GetTurnInfo(providedFrame)
     return false, nil
 end
 
+local function SetupPhantomBox(box, placeholder)
+    box.Text = placeholder
+    box.TextColor3 = THEME.SubText
+    box.Focused:Connect(function()
+        if box.Text == placeholder then box.Text = "" box.TextColor3 = THEME.Text end
+    end)
+    box.FocusLost:Connect(function()
+        if box.Text == "" then box.Text = placeholder box.TextColor3 = THEME.SubText end
+    end)
+end
+
 local function GetSecureParent()
     local success, result = pcall(function() return gethui() end)
     if success and result then return result end
