@@ -1750,45 +1750,78 @@ Instance.new("UICorner", BLRemoveBtn).CornerRadius = UDim.new(0, 6)
 
 -- Add word to blacklist
 BLAddBtn.MouseButton1Click:Connect(function()
-    local word = BLAddBox.Text:lower():gsub("[%s%c]+", "")
-    if #word < 2 then
-        ShowToast("Word must be at least 2 letters!", "warning")
+    local input = BLAddBox.Text:lower():gsub("[%s%c]+", "")
+    if input == "" then
+        ShowToast("Enter at least one word!", "warning")
         return
     end
     
-    if Blacklist[word] then
-        ShowToast("Word already blacklisted!", "warning")
-        return
+    local addedWords = {}
+    local alreadyExists = {}
+    
+    for part in input:gmatch("[^,]+") do
+        local word = part:gsub("[%s%c]+", ""):lower()
+        if #word >= 2 then
+            if Blacklist[word] then
+                table.insert(alreadyExists, word)
+            else
+                Blacklist[word] = true
+                table.insert(addedWords, word)
+            end
+        elseif #word == 1 then
+            ShowToast("Words must be at least 2 letters: '" .. word .. "' skipped", "warning")
+        end
     end
     
-    Blacklist[word] = true
-    SaveBlacklistToFile()
-    BLAddBox.Text = ""
-    BLAddBox:ReleaseFocus()
-    UpdateCountLabel()
-    forceUpdateList = true
-    ShowToast("Blacklisted: " .. word, "error")
+    if #addedWords > 0 then
+        SaveBlacklistToFile()
+        BLAddBox.Text = ""
+        BLAddBox:ReleaseFocus()
+        UpdateCountLabel()
+        forceUpdateList = true
+        ShowToast("Blacklisted " .. #addedWords .. " word(s): " .. table.concat(addedWords, ", "), "error")
+    end
+    
+    if #alreadyExists > 0 then
+        ShowToast("Already blacklisted: " .. table.concat(alreadyExists, ", "), "warning")
+    end
 end)
 
 -- Remove word from blacklist
+-- Remove word(s) from blacklist (supports commas)
 BLRemoveBtn.MouseButton1Click:Connect(function()
-    local word = BLAddBox.Text:lower():gsub("[%s%c]+", "")
-    if #word < 2 then
-        ShowToast("Enter a word to remove!", "warning")
+    local input = BLAddBox.Text:lower():gsub("[%s%c]+", "")
+    if input == "" then
+        ShowToast("Enter at least one word to remove!", "warning")
         return
     end
     
-    if not Blacklist[word] then
-        ShowToast("Word not in blacklist!", "warning")
-        return
+    local removedWords = {}
+    local notFound = {}
+    
+    for part in input:gmatch("[^,]+") do
+        local word = part:gsub("[%s%c]+", ""):lower()
+        if #word >= 2 then
+            if Blacklist[word] then
+                Blacklist[word] = nil
+                table.insert(removedWords, word)
+            else
+                table.insert(notFound, word)
+            end
+        end
     end
     
-    Blacklist[word] = nil
-    SaveBlacklistToFile()
-    BLAddBox.Text = ""
-    UpdateCountLabel()
-    forceUpdateList = true
-    ShowToast("Removed from blacklist: " .. word, "success")
+    if #removedWords > 0 then
+        SaveBlacklistToFile()
+        BLAddBox.Text = ""
+        UpdateCountLabel()
+        forceUpdateList = true
+        ShowToast("Removed " .. #removedWords .. " word(s): " .. table.concat(removedWords, ", "), "success")
+    end
+    
+    if #notFound > 0 then
+        ShowToast("Not in blacklist: " .. table.concat(notFound, ", "), "warning")
+    end
 end)
 
 -- Enter key support - adds word
