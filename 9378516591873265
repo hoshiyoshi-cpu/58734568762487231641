@@ -2458,36 +2458,34 @@ UpdateList = function(detectedText, requiredLetter)
     local sortedGive = {}
 
     if sortMode == "Strategic" then
-        -- Strategic: Sort by length, but randomize within same length groups
-        local lengthGroups = {}
+        -- Priority: 4-7 letter gives first (randomized), then longer gives (randomized)
+        local shortGives = {}   -- 4-7 letters
+        local longGives = {}    -- 8+ letters
         
         for _, w in ipairs(giveWords) do
             local len = #w
-            if not lengthGroups[len] then
-                lengthGroups[len] = {}
+            if len >= 4 and len <= 7 then
+                table.insert(shortGives, w)
+            else
+                table.insert(longGives, w)
             end
-            table.insert(lengthGroups[len], w)
         end
         
-        -- Get all lengths and sort them
-        local sortedLengths = {}
-        for len, _ in pairs(lengthGroups) do
-            table.insert(sortedLengths, len)
+        -- Randomize 4-7 letter group
+        for i = #shortGives, 2, -1 do
+            local j = math.random(i)
+            shortGives[i], shortGives[j] = shortGives[j], shortGives[i]
         end
-        table.sort(sortedLengths)
         
-        -- For each length group, randomize then add to result
-        for _, len in ipairs(sortedLengths) do
-            local group = lengthGroups[len]
-            -- Fisher-Yates shuffle for this group
-            for i = #group, 2, -1 do
-                local j = math.random(i)
-                group[i], group[j] = group[j], group[i]
-            end
-            for _, w in ipairs(group) do
-                table.insert(sortedGive, w)
-            end
+        -- Randomize longer gives
+        for i = #longGives, 2, -1 do
+            local j = math.random(i)
+            longGives[i], longGives[j] = longGives[j], longGives[i]
         end
+        
+        -- 4-7 letter gives first, then longer gives
+        for _, w in ipairs(shortGives) do table.insert(sortedGive, w) end
+        for _, w in ipairs(longGives) do table.insert(sortedGive, w) end
         
     elseif sortMode == "Smart" then
         local mediumGive = {}  -- 6-9 letters
@@ -2519,60 +2517,10 @@ UpdateList = function(detectedText, requiredLetter)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    elseif sortMode == "Shortest" then
-        -- Shortest now uses same length-grouping as Strategic
+    else  -- "Shortest" (now uses Strategic's old grouping logic)
         local lengthGroups = {}
         
         for _, w in ipairs(giveWords) do
-            local len = #w
-            if not lengthGroups[len] then
-                lengthGroups[len] = {}
-            end
-            table.insert(lengthGroups[len], w)
-        end
-        
-        local sortedLengths = {}
-        for len, _ in pairs(lengthGroups) do
-            table.insert(sortedLengths, len)
-        end
-        table.sort(sortedLengths)
-        
-        for _, len in ipairs(sortedLengths) do
-            for _, w in ipairs(lengthGroups[len]) do
-                table.insert(sortedGive, w)
-            end
-        end
-    end
-
-    -- =============================================
-    -- REPLACE THE FALLBACK WORDS SORTING SECTION (around line ~860-890)
-    -- =============================================
-
-    -- STEP 5: Sort FALLBACK words
-    local sortedFallback = {}
-
-    if sortMode == "Strategic" then
-        local priorityGive = {}   -- 4-7 letters
-        local otherGive = {}      -- everything else
-        
-        for _, w in ipairs(giveWords) do
-            local len = #w
-            if len >= 4 and len <= 7 then
-                table.insert(priorityGive, w)
-            else
-                table.insert(otherGive, w)
-            end
-        end
-        
-        -- Randomize 4-7 letter group
-        for i = #priorityGive, 2, -1 do
-            local j = math.random(i)
-            priorityGive[i], priorityGive[j] = priorityGive[j], priorityGive[i]
-        end
-        
-        -- Group other gives by length and randomize within each length
-        local lengthGroups = {}
-        for _, w in ipairs(otherGive) do
             local len = #w
             if not lengthGroups[len] then
                 lengthGroups[len] = {}
@@ -2594,6 +2542,43 @@ UpdateList = function(detectedText, requiredLetter)
             end
             for _, w in ipairs(group) do
                 table.insert(sortedGive, w)
+            end
+        end
+    end
+
+    -- =============================================
+    -- REPLACE THE FALLBACK WORDS SORTING SECTION (around line ~860-890)
+    -- =============================================
+
+    -- STEP 5: Sort FALLBACK words
+    local sortedFallback = {}
+
+    if sortMode == "Strategic" then
+        -- Strategic: Sort by length, randomize within same length groups
+        local lengthGroups = {}
+        
+        for _, w in ipairs(fallbackWords) do
+            local len = #w
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+            end
+            table.insert(lengthGroups[len], w)
+        end
+        
+        local sortedLengths = {}
+        for len, _ in pairs(lengthGroups) do
+            table.insert(sortedLengths, len)
+        end
+        table.sort(sortedLengths)
+        
+        for _, len in ipairs(sortedLengths) do
+            local group = lengthGroups[len]
+            for i = #group, 2, -1 do
+                local j = math.random(i)
+                group[i], group[j] = group[j], group[i]
+            end
+            for _, w in ipairs(group) do
+                table.insert(sortedFallback, w)
             end
         end
         
