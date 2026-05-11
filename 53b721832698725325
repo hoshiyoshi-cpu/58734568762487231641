@@ -2296,9 +2296,6 @@ local function FetchServers()
                         join.MouseButton1Click:Connect(function()
                             join.Text = "Joining..."
                             ShowToast("Teleporting...", "success")
-                            if queue_on_teleport then
-                                queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/hoshiyoshi-cpu/58734568762487231641/refs/heads/main/b5t831257t1325t8"))()')
-                            end
                             task.spawn(function()
                                 local success, err = pcall(function()
                                     game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, srv.id, Players.LocalPlayer)
