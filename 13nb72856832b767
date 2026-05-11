@@ -938,8 +938,8 @@ local function UpdateLayout()
         Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 60), Position = UDim2.new(0, 0, 1, -60)})
         Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -175)})
     else
-        Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 200), Position = UDim2.new(0, 0, 1, -200)})
-        Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -315)})
+        Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 230), Position = UDim2.new(0, 0, 1, -230)})  
+        Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -345)})  
     end
 end
 UpdateLayout()
@@ -2172,6 +2172,170 @@ do
         WordBrowserFrame.Parent = ScreenGui
     end)
 end
+
+local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
+ServerBrowserBtn.Text = "Server Browser"
+ServerBrowserBtn.Font = Enum.Font.GothamMedium
+ServerBrowserBtn.TextSize = 11
+ServerBrowserBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
+ServerBrowserBtn.BackgroundColor3 = THEME.Background
+ServerBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
+ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 95)  -- Below View Used Words
+Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
+
+-- Then create the Server Browser Frame
+local ServerFrame = Instance.new("Frame", ScreenGui)
+ServerFrame.Name = "ServerBrowser"
+ServerFrame.Size = UDim2.new(0, 350, 0, 400)
+ServerFrame.Position = UDim2.new(0.5, -175, 0.5, -200)
+ServerFrame.BackgroundColor3 = THEME.Background
+ServerFrame.Visible = false
+ServerFrame.ClipsDescendants = true
+EnableDragging(ServerFrame)
+Instance.new("UICorner", ServerFrame).CornerRadius = UDim.new(0, 8)
+local SBStroke = Instance.new("UIStroke", ServerFrame)
+SBStroke.Color = THEME.Accent
+SBStroke.Transparency = 0.5
+SBStroke.Thickness = 2
+
+local SBHeader = Instance.new("TextLabel", ServerFrame)
+SBHeader.Text = "Server Browser"
+SBHeader.Font = Enum.Font.GothamBold
+SBHeader.TextSize = 16
+SBHeader.TextColor3 = THEME.Text
+SBHeader.Size = UDim2.new(1, 0, 0, 40)
+SBHeader.BackgroundTransparency = 1
+
+local SBClose = Instance.new("TextButton", ServerFrame)
+SBClose.Text = "X"
+SBClose.Font = Enum.Font.GothamBold
+SBClose.TextSize = 16
+SBClose.TextColor3 = Color3.fromRGB(255, 100, 100)
+SBClose.Size = UDim2.new(0, 40, 0, 40)
+SBClose.Position = UDim2.new(1, -40, 0, 0)
+SBClose.BackgroundTransparency = 1
+SBClose.MouseButton1Click:Connect(function() ServerFrame.Visible = false end)
+
+local SBList = Instance.new("ScrollingFrame", ServerFrame)
+SBList.Size = UDim2.new(1, -20, 1, -90)
+SBList.Position = UDim2.new(0, 10, 0, 50)
+SBList.BackgroundTransparency = 1
+SBList.ScrollBarThickness = 3
+SBList.ScrollBarImageColor3 = THEME.Accent
+
+local SBLayout = Instance.new("UIListLayout", SBList)
+SBLayout.Padding = UDim.new(0, 5)
+SBLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local ServerSortMode = "Smallest"
+
+local SBSortBtn = Instance.new("TextButton", ServerFrame)
+SBSortBtn.Text = "Sort: Smallest"
+SBSortBtn.Font = Enum.Font.GothamBold
+SBSortBtn.TextSize = 12
+SBSortBtn.BackgroundColor3 = THEME.ItemBG
+SBSortBtn.TextColor3 = THEME.SubText
+SBSortBtn.Size = UDim2.new(0.5, -15, 0, 30)
+SBSortBtn.Position = UDim2.new(0, 10, 1, -40)
+Instance.new("UICorner", SBSortBtn).CornerRadius = UDim.new(0, 6)
+
+local SBRefresh = Instance.new("TextButton", ServerFrame)
+SBRefresh.Text = "Refresh"
+SBRefresh.Font = Enum.Font.GothamBold
+SBRefresh.TextSize = 12
+SBRefresh.BackgroundColor3 = THEME.Accent
+SBRefresh.Size = UDim2.new(0.5, -15, 0, 30)
+SBRefresh.Position = UDim2.new(0.5, 5, 1, -40)
+Instance.new("UICorner", SBRefresh).CornerRadius = UDim.new(0, 6)
+
+local function FetchServers()
+    SBRefresh.Text = "..."
+    for _, c in ipairs(SBList:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+    task.spawn(function()
+        local success, result = pcall(function()
+            return request({
+                Url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100",
+                Method = "GET"
+            })
+        end)
+        if success and result and result.Body then
+            local data = HttpService:JSONDecode(result.Body)
+            if data and data.data then
+                local servers = data.data
+                if ServerSortMode == "Smallest" then
+                    table.sort(servers, function(a,b) return (a.playing or 0) < (b.playing or 0) end)
+                else
+                    table.sort(servers, function(a,b) return (a.playing or 0) > (b.playing or 0) end)
+                end
+                for _, srv in ipairs(servers) do
+                    if srv.playing and srv.maxPlayers and srv.id ~= game.JobId then
+                        local row = Instance.new("Frame", SBList)
+                        row.Size = UDim2.new(1, -6, 0, 45)
+                        row.BackgroundColor3 = THEME.ItemBG
+                        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+                        local info = Instance.new("TextLabel", row)
+                        info.Text = "Players: " .. srv.playing .. " / " .. srv.maxPlayers .. "\nPing: " .. (srv.ping or "?") .. "ms"
+                        info.Size = UDim2.new(0.6, 0, 1, 0)
+                        info.Position = UDim2.new(0, 10, 0, 0)
+                        info.BackgroundTransparency = 1
+                        info.TextColor3 = THEME.Text
+                        info.Font = Enum.Font.Gotham
+                        info.TextSize = 12
+                        info.TextXAlignment = Enum.TextXAlignment.Left
+                        local join = Instance.new("TextButton", row)
+                        join.Text = "Join"
+                        join.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+                        join.Size = UDim2.new(0, 80, 0, 25)
+                        join.Position = UDim2.new(1, -90, 0.5, -12.5)
+                        join.Font = Enum.Font.GothamBold
+                        join.TextSize = 12
+                        join.TextColor3 = Color3.fromRGB(255,255,255)
+                        Instance.new("UICorner", join).CornerRadius = UDim.new(0, 4)
+                        join.MouseButton1Click:Connect(function()
+                            join.Text = "Joining..."
+                            ShowToast("Teleporting...", "success")
+                            if queue_on_teleport then
+                                queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/hoshiyoshi-cpu/58734568762487231641/refs/heads/main/97132657892365"))()')
+                            end
+                            task.spawn(function()
+                                local success, err = pcall(function()
+                                    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, srv.id, Players.LocalPlayer)
+                                end)
+                                if not success then
+                                    join.Text = "Failed"
+                                    ShowToast("Teleport Failed: " .. tostring(err), "error")
+                                    task.wait(2)
+                                    join.Text = "Join"
+                                end
+                            end)
+                        end)
+                    end
+                end
+                SBList.CanvasSize = UDim2.new(0,0,0, SBLayout.AbsoluteContentSize.Y)
+            end
+        else
+            ShowToast("Failed to fetch servers", "error")
+        end
+        SBRefresh.Text = "Refresh"
+    end)
+end
+
+SBSortBtn.MouseButton1Click:Connect(function()
+    ServerSortMode = (ServerSortMode == "Smallest") and "Largest" or "Smallest"
+    SBSortBtn.Text = "Sort: " .. ServerSortMode
+    FetchServers()
+end)
+
+SBRefresh.MouseButton1Click:Connect(FetchServers)
+
+ServerBrowserBtn.MouseButton1Click:Connect(function()
+    ServerFrame.Visible = not ServerFrame.Visible
+    ServerFrame.Parent = nil
+    ServerFrame.Parent = ScreenGui
+    if ServerFrame.Visible then FetchServers() end
+end)
 
 -- =============================================
 -- MAIN UPDATE LIST FUNCTION
