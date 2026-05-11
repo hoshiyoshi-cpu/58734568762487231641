@@ -2519,9 +2519,29 @@ UpdateList = function(detectedText, requiredLetter)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    else  -- "Shortest" (unchanged)
-        table.sort(giveWords, function(a,b) return #a < #b end)
-        sortedGive = giveWords
+    elseif sortMode == "Shortest" then
+        -- Shortest now uses same length-grouping as Strategic
+        local lengthGroups = {}
+        
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
+            end
+            table.insert(lengthGroups[len], w)
+        end
+        
+        local sortedLengths = {}
+        for len, _ in pairs(lengthGroups) do
+            table.insert(sortedLengths, len)
+        end
+        table.sort(sortedLengths)
+        
+        for _, len in ipairs(sortedLengths) do
+            for _, w in ipairs(lengthGroups[len]) do
+                table.insert(sortedGive, w)
+            end
+        end
     end
 
     -- =============================================
@@ -2532,10 +2552,27 @@ UpdateList = function(detectedText, requiredLetter)
     local sortedFallback = {}
 
     if sortMode == "Strategic" then
-        -- Strategic: Sort by length, randomize within same length groups
-        local lengthGroups = {}
+        local priorityGive = {}   -- 4-7 letters
+        local otherGive = {}      -- everything else
         
-        for _, w in ipairs(fallbackWords) do
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if len >= 4 and len <= 7 then
+                table.insert(priorityGive, w)
+            else
+                table.insert(otherGive, w)
+            end
+        end
+        
+        -- Randomize 4-7 letter group
+        for i = #priorityGive, 2, -1 do
+            local j = math.random(i)
+            priorityGive[i], priorityGive[j] = priorityGive[j], priorityGive[i]
+        end
+        
+        -- Group other gives by length and randomize within each length
+        local lengthGroups = {}
+        for _, w in ipairs(otherGive) do
             local len = #w
             if not lengthGroups[len] then
                 lengthGroups[len] = {}
@@ -2556,7 +2593,7 @@ UpdateList = function(detectedText, requiredLetter)
                 group[i], group[j] = group[j], group[i]
             end
             for _, w in ipairs(group) do
-                table.insert(sortedFallback, w)
+                table.insert(sortedGive, w)
             end
         end
         
