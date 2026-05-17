@@ -5,8 +5,6 @@
     2. Shortest word for each priority suffix (in order)
     3. Give words (gives.txt) - 6-9 letters prioritized for Smart/Random mode
     4. Fallback words (lastletter.txt)
-    
-    SUFFIX DEPRIORITY: Words ending with specified suffixes are ALWAYS put last
 --]]
 
 local HttpService = game:GetService("HttpService")
@@ -54,7 +52,6 @@ local Config = {
     CustomWords = {},
     TrapPrefixes = {},
     GiveWords = {},
-    DeprioritySuffixes = {},  -- NEW: suffixes that get deprioritized (put last)
 }
 
 local function SaveConfig()
@@ -70,7 +67,6 @@ local function LoadConfig()
             for k, v in pairs(decoded) do Config[k] = v end
         end
     end
-    if not Config.DeprioritySuffixes then Config.DeprioritySuffixes = {} end
 end
 LoadConfig()
 
@@ -475,7 +471,7 @@ end
 local function FetchFallbackWords()
     UpdateStatus("Fetching FALLBACK word list from web...", THEME.Warning)
     local success, res = pcall(function()
-        return request({Url = fileName, Method = "GET"})
+        return request({Url = url, Method = "GET"})
     end)
     
     local onlineWords = {}
@@ -1126,8 +1122,8 @@ local function UpdateLayout()
         Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 60), Position = UDim2.new(0, 0, 1, -60)})
         Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -175)})
     else
-        Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 290), Position = UDim2.new(0, 0, 1, -290)})  
-        Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -405)})  
+        Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 230), Position = UDim2.new(0, 0, 1, -230)})  
+        Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -345)})  
     end
 end
 UpdateLayout()
@@ -1176,7 +1172,7 @@ local SortBtn = CreateToggle("Sort: "..sortMode, UDim2.new(0, 15, 0, 5), UDim2.n
     elseif sortMode == "Smart" then
         sortMode = "Strategic"
     elseif sortMode == "Strategic" then
-        sortMode = "Pro"
+        sortMode = "Pro"  -- ADD THIS
     else
         sortMode = "Shortest"
     end
@@ -1254,210 +1250,6 @@ ServerBrowserBtn.BackgroundColor3 = THEME.Background
 ServerBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
 ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 65)
 Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
-
--- NEW: Suffix Depriority Button
-local SuffixDeprioBtn = Instance.new("TextButton", TogglesFrame)
-SuffixDeprioBtn.Text = "Suffix Deprio"
-SuffixDeprioBtn.Font = Enum.Font.GothamMedium
-SuffixDeprioBtn.TextSize = 11
-SuffixDeprioBtn.TextColor3 = THEME.Warning
-SuffixDeprioBtn.BackgroundColor3 = THEME.Background
-SuffixDeprioBtn.Size = UDim2.new(0, 130, 0, 24)
-SuffixDeprioBtn.Position = UDim2.new(0, 150, 0, 95)
-Instance.new("UICorner", SuffixDeprioBtn).CornerRadius = UDim.new(0, 4)
-
--- =============================================
--- SUFFIX DEPRIORITY FRAME (NEW)
--- =============================================
-
-local DeprioFrame = Instance.new("Frame", ScreenGui)
-DeprioFrame.Name = "DeprioFrame"
-DeprioFrame.Size = UDim2.new(0, 280, 0, 160)
-DeprioFrame.Position = UDim2.new(0.5, -140, 0.5, -80)
-DeprioFrame.BackgroundColor3 = THEME.Background
-DeprioFrame.Visible = false
-DeprioFrame.ClipsDescendants = true
-EnableDragging(DeprioFrame)
-Instance.new("UICorner", DeprioFrame).CornerRadius = UDim.new(0, 8)
-local DPStroke = Instance.new("UIStroke", DeprioFrame)
-DPStroke.Color = THEME.Warning
-DPStroke.Transparency = 0.3
-DPStroke.Thickness = 2
-
-local DPHeader = Instance.new("TextLabel", DeprioFrame)
-DPHeader.Text = "Suffix Depriority Manager"
-DPHeader.Font = Enum.Font.GothamBold
-DPHeader.TextSize = 16
-DPHeader.TextColor3 = THEME.Warning
-DPHeader.Size = UDim2.new(1, 0, 0, 35)
-DPHeader.BackgroundTransparency = 1
-
-local DPClose = Instance.new("TextButton", DeprioFrame)
-DPClose.Text = "X"
-DPClose.Font = Enum.Font.GothamBold
-DPClose.TextSize = 16
-DPClose.TextColor3 = Color3.fromRGB(255, 100, 100)
-DPClose.Size = UDim2.new(0, 35, 0, 35)
-DPClose.Position = UDim2.new(1, -35, 0, 0)
-DPClose.BackgroundTransparency = 1
-DPClose.MouseButton1Click:Connect(function() DeprioFrame.Visible = false end)
-
--- Count label
-local DPCountLabel = Instance.new("TextLabel", DeprioFrame)
-DPCountLabel.Font = Enum.Font.Gotham
-DPCountLabel.TextSize = 11
-DPCountLabel.TextColor3 = THEME.SubText
-DPCountLabel.Size = UDim2.new(1, -20, 0, 20)
-DPCountLabel.Position = UDim2.new(0, 10, 0, 40)
-DPCountLabel.BackgroundTransparency = 1
-DPCountLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-local function UpdateDeprioCountLabel()
-    local count = #Config.DeprioritySuffixes
-    DPCountLabel.Text = count .. " suffix(s) deprioritized (always put last)"
-end
-UpdateDeprioCountLabel()
-
--- Word input box
-local DPAddBox = Instance.new("TextBox", DeprioFrame)
-DPAddBox.Font = Enum.Font.Gotham
-DPAddBox.TextSize = 12
-DPAddBox.BackgroundColor3 = THEME.ItemBG
-DPAddBox.Size = UDim2.new(1, -20, 0, 30)
-DPAddBox.Position = UDim2.new(0, 10, 0, 65)
-Instance.new("UICorner", DPAddBox).CornerRadius = UDim.new(0, 6)
-DPAddBox.PlaceholderText = "Suffixes (e.g., ing,ed,tion,ly)"
-DPAddBox.PlaceholderColor3 = THEME.SubText
-DPAddBox.TextColor3 = THEME.Text
-DPAddBox.Text = ""
-DPAddBox.ClearTextOnFocus = false
-
--- Add button
-local DPAddBtn = Instance.new("TextButton", DeprioFrame)
-DPAddBtn.Text = "Add Suffixes"
-DPAddBtn.Font = Enum.Font.GothamBold
-DPAddBtn.TextSize = 12
-DPAddBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 60)
-DPAddBtn.TextColor3 = THEME.Text
-DPAddBtn.Size = UDim2.new(0.48, -10, 0, 30)
-DPAddBtn.Position = UDim2.new(0, 10, 0, 105)
-Instance.new("UICorner", DPAddBtn).CornerRadius = UDim.new(0, 6)
-
--- Remove button
-local DPRemoveBtn = Instance.new("TextButton", DeprioFrame)
-DPRemoveBtn.Text = "Remove Suffixes"
-DPRemoveBtn.Font = Enum.Font.GothamBold
-DPRemoveBtn.TextSize = 12
-DPRemoveBtn.BackgroundColor3 = THEME.ItemBG
-DPRemoveBtn.TextColor3 = THEME.Success
-DPRemoveBtn.Size = UDim2.new(0.48, -10, 0, 30)
-DPRemoveBtn.Position = UDim2.new(0.52, 0, 0, 105)
-Instance.new("UICorner", DPRemoveBtn).CornerRadius = UDim.new(0, 6)
-
--- Add suffixes to depriority list
-DPAddBtn.MouseButton1Click:Connect(function()
-    local input = DPAddBox.Text:lower():gsub("[%s%c]+", "")
-    if input == "" then
-        ShowToast("Enter at least one suffix!", "warning")
-        return
-    end
-    
-    local addedSuffixes = {}
-    local alreadyExists = {}
-    
-    for part in input:gmatch("[^,]+") do
-        local suffix = part:gsub("[%s%c]+", ""):lower()
-        if #suffix >= 2 then
-            local found = false
-            for _, s in ipairs(Config.DeprioritySuffixes) do
-                if s == suffix then found = true; break end
-            end
-            if found then
-                table.insert(alreadyExists, suffix)
-            else
-                table.insert(Config.DeprioritySuffixes, suffix)
-                table.insert(addedSuffixes, suffix)
-            end
-        elseif #suffix >= 1 then
-            ShowToast("Suffix must be at least 2 letters: '" .. suffix .. "' skipped", "warning")
-        end
-    end
-    
-    if #addedSuffixes > 0 then
-        table.sort(Config.DeprioritySuffixes)
-        SaveConfig()
-        DPAddBox.Text = ""
-        DPAddBox:ReleaseFocus()
-        UpdateDeprioCountLabel()
-        forceUpdateList = true
-        ShowToast("Added " .. #addedSuffixes .. " suffix(es): " .. table.concat(addedSuffixes, ", "), "success")
-    end
-    
-    if #alreadyExists > 0 then
-        ShowToast("Already deprioritized: " .. table.concat(alreadyExists, ", "), "warning")
-    end
-end)
-
--- Remove suffixes from depriority list
-DPRemoveBtn.MouseButton1Click:Connect(function()
-    local input = DPAddBox.Text:lower():gsub("[%s%c]+", "")
-    if input == "" then
-        ShowToast("Enter at least one suffix to remove!", "warning")
-        return
-    end
-    
-    local removedSuffixes = {}
-    local notFound = {}
-    
-    for part in input:gmatch("[^,]+") do
-        local suffix = part:gsub("[%s%c]+", ""):lower()
-        if #suffix >= 2 then
-            local found = false
-            for i, s in ipairs(Config.DeprioritySuffixes) do
-                if s == suffix then
-                    table.remove(Config.DeprioritySuffixes, i)
-                    table.insert(removedSuffixes, suffix)
-                    found = true
-                    break
-                end
-            end
-            if not found then
-                table.insert(notFound, suffix)
-            end
-        end
-    end
-    
-    if #removedSuffixes > 0 then
-        SaveConfig()
-        DPAddBox.Text = ""
-        UpdateDeprioCountLabel()
-        forceUpdateList = true
-        ShowToast("Removed " .. #removedSuffixes .. " suffix(es): " .. table.concat(removedSuffixes, ", "), "success")
-    end
-    
-    if #notFound > 0 then
-        ShowToast("Not in depriority list: " .. table.concat(notFound, ", "), "warning")
-    end
-end)
-
--- Enter key support
-DPAddBox.FocusLost:Connect(function(enter)
-    if enter then
-        DPAddBtn.MouseButton1Click:Fire()
-    end
-end)
-
--- Button click handler
-SuffixDeprioBtn.MouseButton1Click:Connect(function()
-    DeprioFrame.Visible = not DeprioFrame.Visible
-    DeprioFrame.Parent = nil
-    DeprioFrame.Parent = ScreenGui
-    if DeprioFrame.Visible then 
-        UpdateDeprioCountLabel()
-        DPAddBox.Text = ""
-        DPAddBox:ReleaseFocus()
-    end
-end)
 
 -- =============================================
 -- USED WORDS FRAME
@@ -1749,7 +1541,7 @@ end)
 
 local AddWordsFrame = Instance.new("Frame", ScreenGui)
 AddWordsFrame.Name = "AddWordsFrame"
-AddWordsFrame.Size = UDim2.new(0, 320, 0, 170)
+AddWordsFrame.Size = UDim2.new(0, 320, 0, 170)  -- Slightly shorter
 AddWordsFrame.Position = UDim2.new(0.5, -160, 0.5, -115)
 AddWordsFrame.BackgroundColor3 = THEME.Background
 AddWordsFrame.Visible = false
@@ -2577,7 +2369,6 @@ do
     end)
 end
 
--- Additional button
 local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
 ServerBrowserBtn.Text = "Server Browser"
 ServerBrowserBtn.Font = Enum.Font.GothamMedium
@@ -2585,7 +2376,7 @@ ServerBrowserBtn.TextSize = 11
 ServerBrowserBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
 ServerBrowserBtn.BackgroundColor3 = THEME.Background
 ServerBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
-ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 125)
+ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 95)  -- Below View Used Words
 Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
 -- Then create the Server Browser Frame
@@ -2961,13 +2752,13 @@ end)
 LoadPriorityWords()
 
 -- =============================================
--- MAIN UPDATE LIST FUNCTION (UPDATED WITH DEPRIORITY)
+-- MAIN UPDATE LIST FUNCTION
 -- =============================================
 
 local lastRequiredLetter = ""
 
 UpdateList = function(detectedText, requiredLetter)
-    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode) .. "|" .. sortMode .. "|" .. table.concat(Config.DeprioritySuffixes or {}, ",")
+    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode) .. "|" .. sortMode
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
 
@@ -2997,17 +2788,6 @@ UpdateList = function(detectedText, requiredLetter)
 
     local prefixLen = #searchPrefix
     local suffixList = Config.SuffixModes or {}
-    local deprioritySuffixes = Config.DeprioritySuffixes or {}
-    
-    -- Function to check if a word ends with ANY depriority suffix
-    local function isDeprioritized(word)
-        for _, suffix in ipairs(deprioritySuffixes) do
-            if #word >= #suffix and word:sub(-#suffix) == suffix then
-                return true
-            end
-        end
-        return false
-    end
     
     -- ========== COLLECT ALL PREFIX MATCHING WORDS (NO LIMIT) ==========
     local prefixMatchingWords = {}
@@ -3094,11 +2874,11 @@ UpdateList = function(detectedText, requiredLetter)
         table.sort(priorityWords, function(a, b) return #a < #b end)
     end
     
-    -- ========== STEP 4: Separate remaining into NORMAL and DEPRIORITIZED ==========
-    local normalWords = {}
-    local deprioWords = {}
+    -- ========== STEP 4: Separate remaining into GIVE and FALLBACK ==========
+    local giveWords = {}
+    local fallbackWords = {}
 
-    -- Function to check if a word is a "give" word (from gives.txt or pro.txt)
+    -- Use Pro words if in Pro mode, otherwise use regular gives
     local function IsGiveWord(word)
         if sortMode == "Pro" then
             return ProWordsLookup[word] == true
@@ -3109,27 +2889,15 @@ UpdateList = function(detectedText, requiredLetter)
 
     for _, w in ipairs(prefixMatchingWords) do
         if not usedInPriority[w] then
-            if isDeprioritized(w) then
-                table.insert(deprioWords, w)
+            if IsGiveWord(w) then
+                table.insert(giveWords, w)
             else
-                table.insert(normalWords, w)
+                table.insert(fallbackWords, w)
             end
         end
     end
     
-    -- ========== STEP 5: Split NORMAL words into GIVE and FALLBACK ==========
-    local giveWords = {}
-    local fallbackWords = {}
-    
-    for _, w in ipairs(normalWords) do
-        if IsGiveWord(w) then
-            table.insert(giveWords, w)
-        else
-            table.insert(fallbackWords, w)
-        end
-    end
-    
-    -- ========== STEP 6: Sort GIVE words based on mode ==========
+    -- ========== STEP 5: Sort GIVE words based on mode ==========
     local sortedGive = {}
 
     if sortMode == "Strategic" then
@@ -3217,7 +2985,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
 
-    -- ========== STEP 7: Sort FALLBACK words ==========
+    -- ========== STEP 6: Sort FALLBACK words ==========
     local sortedFallback = {}
 
     if sortMode == "Strategic" then
@@ -3265,12 +3033,7 @@ UpdateList = function(detectedText, requiredLetter)
         sortedFallback = fallbackWords
     end
     
-    -- ========== STEP 8: Sort DEPRIORITY words (shortest first within deprio group) ==========
-    local sortedDeprio = {}
-    table.sort(deprioWords, function(a, b) return #a < #b end)
-    sortedDeprio = deprioWords
-    
-    -- ========== STEP 9: Build final result ORDER: Shortest → Suffix → Priority → Give → Fallback → Depriority ==========
+    -- ========== STEP 7: Build final result ORDER: Shortest -> Suffix -> Priority -> Give -> Fallback ==========
     local matches = {}
     
     -- #1: Shortest word overall
@@ -3311,12 +3074,6 @@ UpdateList = function(detectedText, requiredLetter)
         table.insert(matches, w)
     end
     
-    -- #6: DEPRIORITY words (ALWAYS LAST, regardless of mode)
-    for _, w in ipairs(sortedDeprio) do
-        if #matches >= 40 then break end
-        table.insert(matches, w)
-    end
-    
     -- Display results (limit to 15 visible buttons)
     local displayList = {}
     for i = 1, math.min(15, #matches) do
@@ -3327,9 +3084,7 @@ UpdateList = function(detectedText, requiredLetter)
     if #matches > 0 then
         currentBestMatch = matches[1]
         local modeText = (sortMode == "Pro") and "PRO" or ""
-        local deprioCount = #sortedDeprio
-        local deprioText = (deprioCount > 0) and " | " .. deprioCount .. " deprioritized" or ""
-        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. modeText .. deprioText
+        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. modeText
         StatusText.TextColor3 = THEME.Success
         Tween(StatusDot, {BackgroundColor3 = THEME.Success})
     end
@@ -3430,10 +3185,8 @@ UpdateList = function(detectedText, requiredLetter)
                 accentRGB = "100,200,255"
             end
             
-            -- Highlight depriority words with a different color (orange)
-            if isDeprioritized(w) then
-                accentRGB = "255,150,50"
-            elseif priorityWordsLookup[w] then
+            -- Highlight priority words with a different color
+            if priorityWordsLookup[w] then
                 accentRGB = "90,230,206"
             end
 
@@ -3552,6 +3305,8 @@ runConn = RunService.Heartbeat:Connect(function()
                 StatusText.Text = "Word is Censored"
                 StatusText.TextColor3 = THEME.Warning
                 Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
+                -- Don't hide buttons when censored - allow manual search
+                -- for _, btn in ipairs(ButtonCache) do btn.Visible = false end
             end
             
             -- Still allow manual search even when censored
@@ -3655,4 +3410,4 @@ inputConn = UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == TOGGLE_KEY then ScreenGui.Enabled = not ScreenGui.Enabled end
 end)
 
-ShowToast("Yoshi loaded! Priority: Shortest → Suffix → Priority Words → Give → Fallback → Depriority Suffixes", "success")
+ShowToast("Yoshi loaded! Priority: Shortest word → Suffix words → Give words → Fallback words", "success")
