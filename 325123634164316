@@ -78,6 +78,25 @@ if Config.SuffixMode and Config.SuffixMode ~= "" and #Config.SuffixModes == 0 th
     end
 end
 
+local function LoadDeprio()
+    DeprioritySuffixes = {}
+    if isfile and isfile(DeprioFile) then
+        local success, content = pcall(readfile, DeprioFile)
+        if success and content then
+            for line in content:gmatch("[^\r\n]+") do
+                local s = line:gsub("[%s%c]+", ""):lower()
+                if #s > 0 then table.insert(DeprioritySuffixes, s) end
+            end
+        end
+    end
+end
+
+local function SaveDeprio()
+    if writefile then writefile(DeprioFile, table.concat(DeprioritySuffixes, "\n")) end
+end
+
+LoadDeprio()
+
 local sortMode = Config.SortMode
 local suffixMode = Config.SuffixMode or ""
 local lengthMode = Config.LengthMode or 0
@@ -126,6 +145,8 @@ local PriorityFile = "priority.txt"
 local proGivesFile = "progives.txt"  -- Local file for Pro mode
 local ProWords = {}  -- Storage for Pro words
 local ProWordsLookup = {}  -- Quick lookup
+local DeprioritySuffixes = {}  -- ADD THIS LINE
+local DeprioFile = "depriority.txt"  -- ADD THIS LINE
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -2751,6 +2772,137 @@ end)
 -- Load priority words on startup
 LoadPriorityWords()
 
+local SuffixDeprioBtn = Instance.new("TextButton", TogglesFrame)
+SuffixDeprioBtn.Text = "Suffix Deprio"
+SuffixDeprioBtn.Font = Enum.Font.GothamMedium
+SuffixDeprioBtn.TextSize = 11
+SuffixDeprioBtn.TextColor3 = Color3.fromRGB(255, 150, 50)
+SuffixDeprioBtn.BackgroundColor3 = THEME.Background
+SuffixDeprioBtn.Size = UDim2.new(0, 130, 0, 24)
+SuffixDeprioBtn.Position = UDim2.new(0, 150, 0, 95)
+Instance.new("UICorner", SuffixDeprioBtn).CornerRadius = UDim.new(0, 4)
+
+-- Deprio Frame
+local DeprioFrame = Instance.new("Frame", ScreenGui)
+DeprioFrame.Size = UDim2.new(0, 280, 0, 160)
+DeprioFrame.Position = UDim2.new(0.5, -140, 0.5, -80)
+DeprioFrame.BackgroundColor3 = THEME.Background
+DeprioFrame.Visible = false
+DeprioFrame.ClipsDescendants = true
+EnableDragging(DeprioFrame)
+Instance.new("UICorner", DeprioFrame).CornerRadius = UDim.new(0, 8)
+local DeprioStroke = Instance.new("UIStroke", DeprioFrame)
+DeprioStroke.Color = Color3.fromRGB(255, 150, 50)
+DeprioStroke.Thickness = 2
+
+local DeprioHeader = Instance.new("TextLabel", DeprioFrame)
+DeprioHeader.Text = "Suffix Depriority"
+DeprioHeader.Font = Enum.Font.GothamBold
+DeprioHeader.TextSize = 14
+DeprioHeader.TextColor3 = Color3.fromRGB(255, 150, 50)
+DeprioHeader.Size = UDim2.new(1, 0, 0, 35)
+DeprioHeader.BackgroundTransparency = 1
+
+local DeprioClose = Instance.new("TextButton", DeprioFrame)
+DeprioClose.Text = "X"
+DeprioClose.Font = Enum.Font.GothamBold
+DeprioClose.TextSize = 16
+DeprioClose.TextColor3 = Color3.fromRGB(255, 100, 100)
+DeprioClose.Size = UDim2.new(0, 35, 0, 35)
+DeprioClose.Position = UDim2.new(1, -35, 0, 0)
+DeprioClose.BackgroundTransparency = 1
+DeprioClose.MouseButton1Click:Connect(function() DeprioFrame.Visible = false end)
+
+local DeprioCount = Instance.new("TextLabel", DeprioFrame)
+DeprioCount.Font = Enum.Font.Gotham
+DeprioCount.TextSize = 11
+DeprioCount.TextColor3 = THEME.SubText
+DeprioCount.Size = UDim2.new(1, -20, 0, 20)
+DeprioCount.Position = UDim2.new(0, 10, 0, 40)
+DeprioCount.BackgroundTransparency = 1
+DeprioCount.TextXAlignment = Enum.TextXAlignment.Left
+
+local DeprioInput = Instance.new("TextBox", DeprioFrame)
+DeprioInput.Font = Enum.Font.Gotham
+DeprioInput.TextSize = 12
+DeprioInput.BackgroundColor3 = THEME.ItemBG
+DeprioInput.Size = UDim2.new(1, -20, 0, 35)
+DeprioInput.Position = UDim2.new(0, 10, 0, 65)
+Instance.new("UICorner", DeprioInput).CornerRadius = UDim.new(0, 6)
+DeprioInput.PlaceholderText = "ing,ed,tion,ly"
+DeprioInput.PlaceholderColor3 = THEME.SubText
+DeprioInput.TextColor3 = THEME.Text
+DeprioInput.ClearTextOnFocus = false
+
+local DeprioAdd = Instance.new("TextButton", DeprioFrame)
+DeprioAdd.Text = "Add"
+DeprioAdd.Font = Enum.Font.GothamBold
+DeprioAdd.TextSize = 12
+DeprioAdd.BackgroundColor3 = Color3.fromRGB(180, 100, 60)
+DeprioAdd.TextColor3 = THEME.Text
+DeprioAdd.Size = UDim2.new(0.48, -10, 0, 30)
+DeprioAdd.Position = UDim2.new(0, 10, 0, 108)
+Instance.new("UICorner", DeprioAdd).CornerRadius = UDim.new(0, 6)
+
+local DeprioRemove = Instance.new("TextButton", DeprioFrame)
+DeprioRemove.Text = "Remove"
+DeprioRemove.Font = Enum.Font.GothamBold
+DeprioRemove.TextSize = 12
+DeprioRemove.BackgroundColor3 = THEME.ItemBG
+DeprioRemove.TextColor3 = THEME.Success
+DeprioRemove.Size = UDim2.new(0.48, -10, 0, 30)
+DeprioRemove.Position = UDim2.new(0.52, 0, 0, 108)
+Instance.new("UICorner", DeprioRemove).CornerRadius = UDim.new(0, 6)
+
+local function UpdateDeprioUI()
+    DeprioCount.Text = #DeprioritySuffixes .. " suffix(s) deprioritized"
+end
+UpdateDeprioUI()
+
+DeprioAdd.MouseButton1Click:Connect(function()
+    local input = DeprioInput.Text:lower():gsub("[%s%c]+", "")
+    if input == "" then return end
+    for part in input:gmatch("[^,]+") do
+        local s = part:gsub("[%s%c]+", "")
+        if #s >= 2 then
+            local found = false
+            for _, existing in ipairs(DeprioritySuffixes) do
+                if existing == s then found = true; break end
+            end
+            if not found then table.insert(DeprioritySuffixes, s) end
+        end
+    end
+    table.sort(DeprioritySuffixes)
+    SaveDeprio()
+    UpdateDeprioUI()
+    DeprioInput.Text = ""
+    forceUpdateList = true
+    ShowToast(#DeprioritySuffixes .. " suffixes saved", "success")
+end)
+
+DeprioRemove.MouseButton1Click:Connect(function()
+    local input = DeprioInput.Text:lower():gsub("[%s%c]+", "")
+    if input == "" then return end
+    for part in input:gmatch("[^,]+") do
+        local s = part:gsub("[%s%c]+", "")
+        for i = #DeprioritySuffixes, 1, -1 do
+            if DeprioritySuffixes[i] == s then
+                table.remove(DeprioritySuffixes, i)
+                break
+            end
+        end
+    end
+    SaveDeprio()
+    UpdateDeprioUI()
+    DeprioInput.Text = ""
+    forceUpdateList = true
+end)
+
+SuffixDeprioBtn.MouseButton1Click:Connect(function()
+    DeprioFrame.Visible = not DeprioFrame.Visible
+    if DeprioFrame.Visible then UpdateDeprioUI() end
+end)
+
 -- =============================================
 -- MAIN UPDATE LIST FUNCTION
 -- =============================================
@@ -3234,206 +3386,6 @@ UpdateList = function(detectedText, requiredLetter)
     ScrollList.CanvasSize = UDim2.new(0,0,0, UIListLayout.AbsoluteContentSize.Y)
     forceUpdateList = false
 end
-
--- =============================================
--- SUFFIX DEPRIORITY (SAME PATTERN AS BLACKLIST)
--- =============================================
-
-local DeprioritySuffixes = {}
-local DeprioFile = "depriority.txt"
-
-local function LoadDeprio()
-    DeprioritySuffixes = {}
-    if isfile and isfile(DeprioFile) then
-        local success, content = pcall(readfile, DeprioFile)
-        if success and content then
-            for line in content:gmatch("[^\r\n]+") do
-                local s = line:gsub("[%s%c]+", ""):lower()
-                if #s > 0 then table.insert(DeprioritySuffixes, s) end
-            end
-        end
-    end
-end
-
-local function SaveDeprio()
-    if writefile then
-        writefile(DeprioFile, table.concat(DeprioritySuffixes, "\n"))
-    end
-end
-
-LoadDeprio()
-
--- Create button (same position as other buttons)
-local DeprioBtn = Instance.new("TextButton", TogglesFrame)
-DeprioBtn.Text = "Suffix Deprio"
-DeprioBtn.Font = Enum.Font.GothamMedium
-DeprioBtn.TextSize = 11
-DeprioBtn.TextColor3 = Color3.fromRGB(255, 150, 50)
-DeprioBtn.BackgroundColor3 = THEME.Background
-DeprioBtn.Size = UDim2.new(0, 130, 0, 24)
-DeprioBtn.Position = UDim2.new(0, 150, 0, 125)
-Instance.new("UICorner", DeprioBtn).CornerRadius = UDim.new(0, 4)
-
--- Create frame (same pattern as BlacklistFrame)
-local DeprioFrame = Instance.new("Frame", ScreenGui)
-DeprioFrame.Name = "DeprioFrame"
-DeprioFrame.Size = UDim2.new(0, 280, 0, 160)
-DeprioFrame.Position = UDim2.new(0.5, -140, 0.5, -80)
-DeprioFrame.BackgroundColor3 = THEME.Background
-DeprioFrame.Visible = false
-DeprioFrame.ClipsDescendants = true
-EnableDragging(DeprioFrame)
-Instance.new("UICorner", DeprioFrame).CornerRadius = UDim.new(0, 8)
-local DeprioStroke = Instance.new("UIStroke", DeprioFrame)
-DeprioStroke.Color = Color3.fromRGB(255, 150, 50)
-DeprioStroke.Transparency = 0.3
-DeprioStroke.Thickness = 2
-
-local DeprioHeader = Instance.new("TextLabel", DeprioFrame)
-DeprioHeader.Text = "Suffix Depriority Manager"
-DeprioHeader.Font = Enum.Font.GothamBold
-DeprioHeader.TextSize = 16
-DeprioHeader.TextColor3 = Color3.fromRGB(255, 150, 50)
-DeprioHeader.Size = UDim2.new(1, 0, 0, 35)
-DeprioHeader.BackgroundTransparency = 1
-
-local DeprioClose = Instance.new("TextButton", DeprioFrame)
-DeprioClose.Text = "X"
-DeprioClose.Font = Enum.Font.GothamBold
-DeprioClose.TextSize = 16
-DeprioClose.TextColor3 = Color3.fromRGB(255, 100, 100)
-DeprioClose.Size = UDim2.new(0, 35, 0, 35)
-DeprioClose.Position = UDim2.new(1, -35, 0, 0)
-DeprioClose.BackgroundTransparency = 1
-DeprioClose.MouseButton1Click:Connect(function() DeprioFrame.Visible = false end)
-
-local DeprioCountLabel = Instance.new("TextLabel", DeprioFrame)
-DeprioCountLabel.Font = Enum.Font.Gotham
-DeprioCountLabel.TextSize = 11
-DeprioCountLabel.TextColor3 = THEME.SubText
-DeprioCountLabel.Size = UDim2.new(1, -20, 0, 20)
-DeprioCountLabel.Position = UDim2.new(0, 10, 0, 40)
-DeprioCountLabel.BackgroundTransparency = 1
-DeprioCountLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-local DeprioInputBox = Instance.new("TextBox", DeprioFrame)
-DeprioInputBox.Font = Enum.Font.Gotham
-DeprioInputBox.TextSize = 12
-DeprioInputBox.BackgroundColor3 = THEME.ItemBG
-DeprioInputBox.Size = UDim2.new(1, -20, 0, 30)
-DeprioInputBox.Position = UDim2.new(0, 10, 0, 65)
-Instance.new("UICorner", DeprioInputBox).CornerRadius = UDim.new(0, 6)
-DeprioInputBox.PlaceholderText = "Suffixes (ing,ed,tion,ly)"
-DeprioInputBox.PlaceholderColor3 = THEME.SubText
-DeprioInputBox.TextColor3 = THEME.Text
-DeprioInputBox.Text = ""
-DeprioInputBox.ClearTextOnFocus = false
-
-local DeprioAddBtn = Instance.new("TextButton", DeprioFrame)
-DeprioAddBtn.Text = "Add Suffixes"
-DeprioAddBtn.Font = Enum.Font.GothamBold
-DeprioAddBtn.TextSize = 12
-DeprioAddBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 60)
-DeprioAddBtn.TextColor3 = THEME.Text
-DeprioAddBtn.Size = UDim2.new(0.48, -10, 0, 30)
-DeprioAddBtn.Position = UDim2.new(0, 10, 0, 105)
-Instance.new("UICorner", DeprioAddBtn).CornerRadius = UDim.new(0, 6)
-
-local DeprioRemoveBtn = Instance.new("TextButton", DeprioFrame)
-DeprioRemoveBtn.Text = "Remove Suffixes"
-DeprioRemoveBtn.Font = Enum.Font.GothamBold
-DeprioRemoveBtn.TextSize = 12
-DeprioRemoveBtn.BackgroundColor3 = THEME.ItemBG
-DeprioRemoveBtn.TextColor3 = THEME.Success
-DeprioRemoveBtn.Size = UDim2.new(0.48, -10, 0, 30)
-DeprioRemoveBtn.Position = UDim2.new(0.52, 0, 0, 105)
-Instance.new("UICorner", DeprioRemoveBtn).CornerRadius = UDim.new(0, 6)
-
-local function UpdateDeprioUI()
-    DeprioCountLabel.Text = #DeprioritySuffixes .. " suffix(s) deprioritized (always last)"
-end
-UpdateDeprioUI()
-
-DeprioAddBtn.MouseButton1Click:Connect(function()
-    local input = DeprioInputBox.Text:lower():gsub("[%s%c]+", "")
-    if input == "" then
-        ShowToast("Enter at least one suffix!", "warning")
-        return
-    end
-    
-    local added = {}
-    for part in input:gmatch("[^,]+") do
-        local s = part:gsub("[%s%c]+", "")
-        if #s >= 2 then
-            local found = false
-            for _, existing in ipairs(DeprioritySuffixes) do
-                if existing == s then found = true; break end
-            end
-            if not found then
-                table.insert(DeprioritySuffixes, s)
-                table.insert(added, s)
-            end
-        end
-    end
-    
-    if #added > 0 then
-        table.sort(DeprioritySuffixes)
-        SaveDeprio()
-        UpdateDeprioUI()
-        DeprioInputBox.Text = ""
-        forceUpdateList = true
-        ShowToast("Added " .. #added .. " suffix(s): " .. table.concat(added, ", "), "success")
-    else
-        ShowToast("No new suffixes added", "warning")
-    end
-end)
-
-DeprioRemoveBtn.MouseButton1Click:Connect(function()
-    local input = DeprioInputBox.Text:lower():gsub("[%s%c]+", "")
-    if input == "" then
-        ShowToast("Enter suffixes to remove!", "warning")
-        return
-    end
-    
-    local removed = {}
-    for part in input:gmatch("[^,]+") do
-        local s = part:gsub("[%s%c]+", "")
-        for i = #DeprioritySuffixes, 1, -1 do
-            if DeprioritySuffixes[i] == s then
-                table.remove(DeprioritySuffixes, i)
-                table.insert(removed, s)
-                break
-            end
-        end
-    end
-    
-    if #removed > 0 then
-        SaveDeprio()
-        UpdateDeprioUI()
-        DeprioInputBox.Text = ""
-        forceUpdateList = true
-        ShowToast("Removed " .. #removed .. " suffix(s): " .. table.concat(removed, ", "), "success")
-    else
-        ShowToast("No matching suffixes found", "warning")
-    end
-end)
-
-DeprioInputBox.FocusLost:Connect(function(enter)
-    if enter then
-        DeprioAddBtn.MouseButton1Click:Fire()
-    end
-end)
-
-DeprioBtn.MouseButton1Click:Connect(function()
-    DeprioFrame.Visible = not DeprioFrame.Visible
-    DeprioFrame.Parent = nil
-    DeprioFrame.Parent = ScreenGui
-    if DeprioFrame.Visible then
-        UpdateDeprioUI()
-        DeprioInputBox.Text = ""
-        DeprioInputBox:ReleaseFocus()
-    end
-end)
 
 -- =============================================
 -- MINIMIZE
