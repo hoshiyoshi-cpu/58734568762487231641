@@ -2,10 +2,11 @@
     YOSHI - Word Helper with Discord Bot Strategy
     PRIORITY ORDER:
     1. Shortest word overall (any source)
-    2. Priority words (custom per prefix)
-    3. Give words (gives.txt / progives.txt)
-    4. SUFFIX WORDS (always last before fallback)
-    5. Fallback words (lastletter.txt)
+    2. Shortest word for each priority suffix (in order)
+    3. Give words (gives.txt) - 6-9 letters prioritized for Smart/Random mode
+    4. Fallback words (lastletter.txt)
+    
+    SUFFIX DEPRIORITY: Words ending with specified suffixes are ALWAYS put last
 --]]
 
 local HttpService = game:GetService("HttpService")
@@ -53,6 +54,7 @@ local Config = {
     CustomWords = {},
     TrapPrefixes = {},
     GiveWords = {},
+    DeprioritySuffixes = {},  -- NEW: suffixes that get deprioritized (put last)
 }
 
 local function SaveConfig()
@@ -68,6 +70,7 @@ local function LoadConfig()
             for k, v in pairs(decoded) do Config[k] = v end
         end
     end
+    if not Config.DeprioritySuffixes then Config.DeprioritySuffixes = {} end
 end
 LoadConfig()
 
@@ -124,10 +127,11 @@ local CustomAddedFile = "customadded.txt"
 local customFallbackFile = "customfallback.txt"  
 local customGivesFile = "customgives.txt"      
 local PriorityFile = "priority.txt"
-local proGivesFile = "progives.txt"
-local ProWords = {}
-local ProWordsLookup = {}
+local proGivesFile = "progives.txt"  -- Local file for Pro mode
+local ProWords = {}  -- Storage for Pro words
+local ProWordsLookup = {}  -- Quick lookup
 
+-- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
 local FallbackWords = {}
 local AllWords = {}
@@ -135,7 +139,7 @@ local SeenWords = {}
 local PriorityWords = {}  
 local PriorityPrefixList = {}  
 
--- Loading UI
+-- Temporary Loading UI
 local LoadingGui = Instance.new("ScreenGui")
 LoadingGui.Name = "WordHelperLoading"
 local success, parent = pcall(function() return gethui() end)
@@ -177,6 +181,10 @@ local function UpdateStatus(text, color)
     game:GetService("RunService").RenderStepped:Wait()
 end
 
+-- =============================================
+-- LOOKUP FUNCTIONS
+-- =============================================
+
 local GiveWordsLookup = {}
 local function RefreshGiveWordsLookup()
     local lookup = {}
@@ -196,6 +204,14 @@ local function RefreshTrapLookup()
     end
     TrapPrefixesLookup = lookup
 end
+
+-- =============================================
+-- CUSTOM FILE HELPER FUNCTIONS
+-- =============================================
+
+-- =============================================
+-- PRIORITY WORDS FUNCTIONS
+-- =============================================
 
 local function LoadProWords()
     ProWords = {}
@@ -219,6 +235,9 @@ end
 
 LoadProWords()
 
+local PriorityFile = "priority.txt"
+
+-- Load priority words from file
 local function LoadPriorityWords()
     PriorityWords = {}
     PriorityPrefixList = {}
@@ -248,6 +267,7 @@ local function LoadPriorityWords()
     end
 end
 
+-- Save priority words to file
 local function SavePriorityWords()
     if not writefile then return end
     
@@ -269,6 +289,7 @@ local function SavePriorityWords()
     pcall(function() writefile(PriorityFile, content) end)
 end
 
+-- Add words to priority list for a specific prefix
 local function AddPriorityWords(prefix, words)
     prefix = prefix:lower():gsub("[%s%c]+", "")
     if prefix == "" then return false, "No prefix provided" end
@@ -297,6 +318,7 @@ local function AddPriorityWords(prefix, words)
     return false, "No new words added"
 end
 
+-- Remove words from priority list
 local function RemovePriorityWords(prefix, words)
     prefix = prefix:lower():gsub("[%s%c]+", "")
     if prefix == "" or not PriorityWords[prefix] then 
@@ -334,6 +356,7 @@ local function RemovePriorityWords(prefix, words)
     return false, "No words found to remove"
 end
 
+-- Delete entire prefix
 local function DeletePriorityPrefix(prefix)
     prefix = prefix:lower():gsub("[%s%c]+", "")
     if PriorityWords[prefix] then
@@ -350,6 +373,7 @@ local function DeletePriorityPrefix(prefix)
     return false
 end
 
+-- Get priority words for a specific prefix (returns list)
 local function GetPriorityWordsForPrefix(prefix)
     prefix = prefix:lower():gsub("[%s%c]+", "")
     if PriorityWords[prefix] then
@@ -357,6 +381,7 @@ local function GetPriorityWordsForPrefix(prefix)
         for w in pairs(PriorityWords[prefix]) do
             table.insert(words, w)
         end
+        -- Sort by length (shortest first) for priority display
         table.sort(words, function(a, b) return #a < #b end)
         return words
     end
@@ -390,6 +415,10 @@ local function SaveCustomWordsToFile(filePath, words)
     pcall(function() writefile(filePath, content) end)
 end
 
+-- =============================================
+-- UPDATED FETCH FUNCTIONS (Web + Custom files)
+-- =============================================
+
 local function FetchPrimaryWords()
     UpdateStatus("Fetching PRIMARY word list from web...", THEME.Warning)
     local success, res = pcall(function()
@@ -398,6 +427,7 @@ local function FetchPrimaryWords()
     
     local onlineWords = {}
     if success and res and res.Body then
+        -- Save the original web version
         writefile(givesFileName, res.Body)
         UpdateStatus("Primary words fetched!", THEME.Success)
         
@@ -408,6 +438,7 @@ local function FetchPrimaryWords()
             end
         end
     else
+        -- If download fails, try to load existing file
         if isfile and isfile(givesFileName) then
             local content = readfile(givesFileName)
             for w in content:gmatch("[^\r\n]+") do
@@ -419,8 +450,10 @@ local function FetchPrimaryWords()
         end
     end
     
+    -- Load custom gives words from separate file
     local customWords = LoadCustomWordsFromFile(customGivesFile)
     
+    -- Merge online + custom gives words (but don't save to web file)
     local allPrimaryWords = {}
     for word in pairs(onlineWords) do
         table.insert(allPrimaryWords, word)
@@ -432,6 +465,7 @@ local function FetchPrimaryWords()
     end
     table.sort(allPrimaryWords)
     
+    -- Return the merged list as content
     local mergedContent = table.concat(allPrimaryWords, "\n")
     
     UpdateStatus("Primary: " .. #onlineWords .. " online + " .. (#allPrimaryWords - #onlineWords) .. " custom = " .. #allPrimaryWords, THEME.Success)
@@ -467,8 +501,10 @@ local function FetchFallbackWords()
         end
     end
     
+    -- Load custom fallback words from separate file
     local customWords = LoadCustomWordsFromFile(customFallbackFile)
     
+    -- Merge online + custom fallback words
     local allFallbackWords = {}
     for word in pairs(onlineWords) do
         table.insert(allFallbackWords, word)
@@ -581,6 +617,7 @@ if LoadingGui then LoadingGui:Destroy() end
 
 RefreshGiveWordsLookup()
 
+-- Build buckets
 Buckets = {}
 for _, w in ipairs(AllWords) do
     local c = w:sub(1,1) or ""
@@ -621,6 +658,10 @@ end
 
 SeenWords = nil
 
+-- =============================================
+-- HELPER FUNCTION
+-- =============================================
+
 local function GetMatchLength(str, prefix)
     local len = 0
     local max = math.min(#str, #prefix)
@@ -636,7 +677,8 @@ local function GetMatchLength(str, prefix)
     return len
 end
 
-local function AddToCustomTracking(word, fileType)
+-- Save custom added word to tracking file
+local function AddToCustomTracking(word, fileType)  -- fileType: "fallback", "gives", or "both"
     if not writefile then return end
     
     local tracking = {}
@@ -672,6 +714,7 @@ local function AddToCustomTracking(word, fileType)
     pcall(function() writefile(CustomAddedFile, table.concat(lines, "\n")) end)
 end
 
+-- Remove word from tracking file
 local function RemoveFromCustomTracking(word)
     if not writefile or not isfile then return end
     if not isfile(CustomAddedFile) then return end
@@ -691,14 +734,17 @@ local function RemoveFromCustomTracking(word)
     pcall(function() writefile(CustomAddedFile, newContent) end)
 end
 
+-- Helper function to add words to custom files
 local function AddWordsToCustomFile(filePath, words)
     if not writefile or not isfile then
         ShowToast("File writing not supported!", "error")
         return false
     end
     
+    -- Load existing custom words
     local customWords = LoadCustomWordsFromFile(filePath)
     
+    -- Add new words
     local addedWords = {}
     for part in words:gmatch("[^,]+") do
         local word = part:gsub("[%s%c]+", ""):lower()
@@ -715,10 +761,12 @@ local function AddWordsToCustomFile(filePath, words)
         return false
     end
     
+    -- Save to custom file
     SaveCustomWordsToFile(filePath, customWords)
     return true, addedWords
 end
 
+-- Helper function to remove words from custom files
 local function RemoveWordsFromCustomFile(filePath, words)
     if not writefile or not isfile then
         ShowToast("File writing not supported!", "error")
@@ -730,8 +778,10 @@ local function RemoveWordsFromCustomFile(filePath, words)
         return false
     end
     
+    -- Load existing custom words
     local customWords = LoadCustomWordsFromFile(filePath)
     
+    -- Parse words to remove
     local removedWords = {}
     for part in words:gmatch("[^,]+") do
         local word = part:gsub("[%s%c]+", ""):lower()
@@ -748,9 +798,14 @@ local function RemoveWordsFromCustomFile(filePath, words)
         return false
     end
     
+    -- Save updated custom words
     SaveCustomWordsToFile(filePath, customWords)
     return true, removedWords
 end
+
+-- =============================================
+-- UI SETUP
+-- =============================================
 
 local function Tween(obj, props, time)
     TweenService:Create(obj, TweenInfo.new(time or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
@@ -1071,8 +1126,8 @@ local function UpdateLayout()
         Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 60), Position = UDim2.new(0, 0, 1, -60)})
         Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -175)})
     else
-        Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 280), Position = UDim2.new(0, 0, 1, -280)})  
-        Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -395)})  
+        Tween(SettingsFrame, {Size = UDim2.new(1, 0, 0, 290), Position = UDim2.new(0, 0, 1, -290)})  
+        Tween(ScrollList, {Size = UDim2.new(1, -10, 1, -405)})  
     end
 end
 UpdateLayout()
@@ -1200,137 +1255,208 @@ ServerBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
 ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 65)
 Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
+-- NEW: Suffix Depriority Button
+local SuffixDeprioBtn = Instance.new("TextButton", TogglesFrame)
+SuffixDeprioBtn.Text = "Suffix Deprio"
+SuffixDeprioBtn.Font = Enum.Font.GothamMedium
+SuffixDeprioBtn.TextSize = 11
+SuffixDeprioBtn.TextColor3 = THEME.Warning
+SuffixDeprioBtn.BackgroundColor3 = THEME.Background
+SuffixDeprioBtn.Size = UDim2.new(0, 130, 0, 24)
+SuffixDeprioBtn.Position = UDim2.new(0, 150, 0, 95)
+Instance.new("UICorner", SuffixDeprioBtn).CornerRadius = UDim.new(0, 4)
+
 -- =============================================
--- SUFFIX MANAGER BUTTON (opens its own window)
+-- SUFFIX DEPRIORITY FRAME (NEW)
 -- =============================================
 
-local SuffixManagerBtn = Instance.new("TextButton", TogglesFrame)
-SuffixManagerBtn.Text = "Suffix Manager"
-SuffixManagerBtn.Font = Enum.Font.GothamMedium
-SuffixManagerBtn.TextSize = 11
-SuffixManagerBtn.TextColor3 = THEME.Warning
-SuffixManagerBtn.BackgroundColor3 = THEME.Background
-SuffixManagerBtn.Size = UDim2.new(0, 130, 0, 24)
-SuffixManagerBtn.Position = UDim2.new(0, 15, 0, 125)
-Instance.new("UICorner", SuffixManagerBtn).CornerRadius = UDim.new(0, 4)
+local DeprioFrame = Instance.new("Frame", ScreenGui)
+DeprioFrame.Name = "DeprioFrame"
+DeprioFrame.Size = UDim2.new(0, 280, 0, 160)
+DeprioFrame.Position = UDim2.new(0.5, -140, 0.5, -80)
+DeprioFrame.BackgroundColor3 = THEME.Background
+DeprioFrame.Visible = false
+DeprioFrame.ClipsDescendants = true
+EnableDragging(DeprioFrame)
+Instance.new("UICorner", DeprioFrame).CornerRadius = UDim.new(0, 8)
+local DPStroke = Instance.new("UIStroke", DeprioFrame)
+DPStroke.Color = THEME.Warning
+DPStroke.Transparency = 0.3
+DPStroke.Thickness = 2
 
--- Suffix Manager Frame (popup window)
-local SuffixFrame = Instance.new("Frame", ScreenGui)
-SuffixFrame.Name = "SuffixFrame"
-SuffixFrame.Size = UDim2.new(0, 300, 0, 200)
-SuffixFrame.Position = UDim2.new(0.5, -150, 0.5, -100)
-SuffixFrame.BackgroundColor3 = THEME.Background
-SuffixFrame.Visible = false
-SuffixFrame.ClipsDescendants = true
-EnableDragging(SuffixFrame)
-Instance.new("UICorner", SuffixFrame).CornerRadius = UDim.new(0, 8)
-local SufStroke = Instance.new("UIStroke", SuffixFrame)
-SufStroke.Color = THEME.Warning
-SufStroke.Transparency = 0.3
-SufStroke.Thickness = 2
+local DPHeader = Instance.new("TextLabel", DeprioFrame)
+DPHeader.Text = "Suffix Depriority Manager"
+DPHeader.Font = Enum.Font.GothamBold
+DPHeader.TextSize = 16
+DPHeader.TextColor3 = THEME.Warning
+DPHeader.Size = UDim2.new(1, 0, 0, 35)
+DPHeader.BackgroundTransparency = 1
 
-local SufHeader = Instance.new("TextLabel", SuffixFrame)
-SufHeader.Text = "Suffix Manager"
-SufHeader.Font = Enum.Font.GothamBold
-SufHeader.TextSize = 16
-SufHeader.TextColor3 = THEME.Warning
-SufHeader.Size = UDim2.new(1, 0, 0, 35)
-SufHeader.BackgroundTransparency = 1
+local DPClose = Instance.new("TextButton", DeprioFrame)
+DPClose.Text = "X"
+DPClose.Font = Enum.Font.GothamBold
+DPClose.TextSize = 16
+DPClose.TextColor3 = Color3.fromRGB(255, 100, 100)
+DPClose.Size = UDim2.new(0, 35, 0, 35)
+DPClose.Position = UDim2.new(1, -35, 0, 0)
+DPClose.BackgroundTransparency = 1
+DPClose.MouseButton1Click:Connect(function() DeprioFrame.Visible = false end)
 
-local SufClose = Instance.new("TextButton", SuffixFrame)
-SufClose.Text = "X"
-SufClose.Font = Enum.Font.GothamBold
-SufClose.TextSize = 16
-SufClose.TextColor3 = Color3.fromRGB(255, 100, 100)
-SufClose.Size = UDim2.new(0, 35, 0, 35)
-SufClose.Position = UDim2.new(1, -35, 0, 0)
-SufClose.BackgroundTransparency = 1
-SufClose.MouseButton1Click:Connect(function() SuffixFrame.Visible = false end)
+-- Count label
+local DPCountLabel = Instance.new("TextLabel", DeprioFrame)
+DPCountLabel.Font = Enum.Font.Gotham
+DPCountLabel.TextSize = 11
+DPCountLabel.TextColor3 = THEME.SubText
+DPCountLabel.Size = UDim2.new(1, -20, 0, 20)
+DPCountLabel.Position = UDim2.new(0, 10, 0, 40)
+DPCountLabel.BackgroundTransparency = 1
+DPCountLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local SufDesc = Instance.new("TextLabel", SuffixFrame)
-SufDesc.Text = "Words ending with these suffixes will ALWAYS appear LAST\n(after gives.txt/progives.txt, before fallback)"
-SufDesc.Font = Enum.Font.Gotham
-SufDesc.TextSize = 10
-SufDesc.TextColor3 = THEME.SubText
-SufDesc.Size = UDim2.new(1, -20, 0, 30)
-SufDesc.Position = UDim2.new(0, 10, 0, 40)
-SufDesc.BackgroundTransparency = 1
-SufDesc.TextWrapped = true
+local function UpdateDeprioCountLabel()
+    local count = #Config.DeprioritySuffixes
+    DPCountLabel.Text = count .. " suffix(s) deprioritized (always put last)"
+end
+UpdateDeprioCountLabel()
 
-local SufInput = Instance.new("TextBox", SuffixFrame)
-SufInput.Font = Enum.Font.Gotham
-SufInput.TextSize = 12
-SufInput.BackgroundColor3 = THEME.ItemBG
-SufInput.TextColor3 = THEME.Text
-SufInput.PlaceholderText = "suffixes (comma: ing,ed,er,tion)"
-SufInput.PlaceholderColor3 = THEME.SubText
-SufInput.Size = UDim2.new(1, -20, 0, 35)
-SufInput.Position = UDim2.new(0, 10, 0, 80)
-Instance.new("UICorner", SufInput).CornerRadius = UDim.new(0, 6)
-SufInput.Text = table.concat(Config.SuffixModes, ",")
+-- Word input box
+local DPAddBox = Instance.new("TextBox", DeprioFrame)
+DPAddBox.Font = Enum.Font.Gotham
+DPAddBox.TextSize = 12
+DPAddBox.BackgroundColor3 = THEME.ItemBG
+DPAddBox.Size = UDim2.new(1, -20, 0, 30)
+DPAddBox.Position = UDim2.new(0, 10, 0, 65)
+Instance.new("UICorner", DPAddBox).CornerRadius = UDim.new(0, 6)
+DPAddBox.PlaceholderText = "Suffixes (e.g., ing,ed,tion,ly)"
+DPAddBox.PlaceholderColor3 = THEME.SubText
+DPAddBox.TextColor3 = THEME.Text
+DPAddBox.Text = ""
+DPAddBox.ClearTextOnFocus = false
 
-local SufSaveBtn = Instance.new("TextButton", SuffixFrame)
-SufSaveBtn.Text = "Save Suffix Priority"
-SufSaveBtn.Font = Enum.Font.GothamBold
-SufSaveBtn.TextSize = 12
-SufSaveBtn.BackgroundColor3 = THEME.Success
-SufSaveBtn.TextColor3 = THEME.Background
-SufSaveBtn.Size = UDim2.new(0.48, -10, 0, 35)
-SufSaveBtn.Position = UDim2.new(0, 10, 1, -45)
-Instance.new("UICorner", SufSaveBtn).CornerRadius = UDim.new(0, 6)
+-- Add button
+local DPAddBtn = Instance.new("TextButton", DeprioFrame)
+DPAddBtn.Text = "Add Suffixes"
+DPAddBtn.Font = Enum.Font.GothamBold
+DPAddBtn.TextSize = 12
+DPAddBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 60)
+DPAddBtn.TextColor3 = THEME.Text
+DPAddBtn.Size = UDim2.new(0.48, -10, 0, 30)
+DPAddBtn.Position = UDim2.new(0, 10, 0, 105)
+Instance.new("UICorner", DPAddBtn).CornerRadius = UDim.new(0, 6)
 
-local SufClearBtn = Instance.new("TextButton", SuffixFrame)
-SufClearBtn.Text = "Clear All"
-SufClearBtn.Font = Enum.Font.GothamBold
-SufClearBtn.TextSize = 12
-SufClearBtn.BackgroundColor3 = THEME.Warning
-SufClearBtn.TextColor3 = THEME.Background
-SufClearBtn.Size = UDim2.new(0.48, -10, 0, 35)
-SufClearBtn.Position = UDim2.new(0.52, 0, 1, -45)
-Instance.new("UICorner", SufClearBtn).CornerRadius = UDim.new(0, 6)
+-- Remove button
+local DPRemoveBtn = Instance.new("TextButton", DeprioFrame)
+DPRemoveBtn.Text = "Remove Suffixes"
+DPRemoveBtn.Font = Enum.Font.GothamBold
+DPRemoveBtn.TextSize = 12
+DPRemoveBtn.BackgroundColor3 = THEME.ItemBG
+DPRemoveBtn.TextColor3 = THEME.Success
+DPRemoveBtn.Size = UDim2.new(0.48, -10, 0, 30)
+DPRemoveBtn.Position = UDim2.new(0.52, 0, 0, 105)
+Instance.new("UICorner", DPRemoveBtn).CornerRadius = UDim.new(0, 6)
 
-local function SaveSuffixPriority()
-    local input = SufInput.Text:lower():gsub("[%s%c]+", "")
-    local newSuffixModes = {}
+-- Add suffixes to depriority list
+DPAddBtn.MouseButton1Click:Connect(function()
+    local input = DPAddBox.Text:lower():gsub("[%s%c]+", "")
+    if input == "" then
+        ShowToast("Enter at least one suffix!", "warning")
+        return
+    end
+    
+    local addedSuffixes = {}
+    local alreadyExists = {}
     
     for part in input:gmatch("[^,]+") do
-        local clean = part:gsub("[%s%c]+", "")
-        if #clean > 0 then
-            table.insert(newSuffixModes, clean)
+        local suffix = part:gsub("[%s%c]+", ""):lower()
+        if #suffix >= 2 then
+            local found = false
+            for _, s in ipairs(Config.DeprioritySuffixes) do
+                if s == suffix then found = true; break end
+            end
+            if found then
+                table.insert(alreadyExists, suffix)
+            else
+                table.insert(Config.DeprioritySuffixes, suffix)
+                table.insert(addedSuffixes, suffix)
+            end
+        elseif #suffix >= 1 then
+            ShowToast("Suffix must be at least 2 letters: '" .. suffix .. "' skipped", "warning")
         end
     end
     
-    Config.SuffixModes = newSuffixModes
-    Config.SuffixMode = input
-    SaveConfig()
-    
-    if #newSuffixModes > 0 then
-        local priorityText = ""
-        for i, s in ipairs(newSuffixModes) do
-            if i > 1 then priorityText = priorityText .. ", " end
-            priorityText = priorityText .. s
-        end
-        ShowToast("Suffix priority saved: " .. priorityText, "success")
-    else
-        ShowToast("All suffixes cleared", "warning")
+    if #addedSuffixes > 0 then
+        table.sort(Config.DeprioritySuffixes)
+        SaveConfig()
+        DPAddBox.Text = ""
+        DPAddBox:ReleaseFocus()
+        UpdateDeprioCountLabel()
+        forceUpdateList = true
+        ShowToast("Added " .. #addedSuffixes .. " suffix(es): " .. table.concat(addedSuffixes, ", "), "success")
     end
     
-    forceUpdateList = true
-    if UpdateList then UpdateList(lastDetected, lastRequiredLetter) end
-end
-
-SufSaveBtn.MouseButton1Click:Connect(SaveSuffixPriority)
-
-SufClearBtn.MouseButton1Click:Connect(function()
-    SufInput.Text = ""
-    SaveSuffixPriority()
+    if #alreadyExists > 0 then
+        ShowToast("Already deprioritized: " .. table.concat(alreadyExists, ", "), "warning")
+    end
 end)
 
-SuffixManagerBtn.MouseButton1Click:Connect(function()
-    SufInput.Text = table.concat(Config.SuffixModes, ",")
-    SuffixFrame.Visible = not SuffixFrame.Visible
-    SuffixFrame.Parent = nil
-    SuffixFrame.Parent = ScreenGui
+-- Remove suffixes from depriority list
+DPRemoveBtn.MouseButton1Click:Connect(function()
+    local input = DPAddBox.Text:lower():gsub("[%s%c]+", "")
+    if input == "" then
+        ShowToast("Enter at least one suffix to remove!", "warning")
+        return
+    end
+    
+    local removedSuffixes = {}
+    local notFound = {}
+    
+    for part in input:gmatch("[^,]+") do
+        local suffix = part:gsub("[%s%c]+", ""):lower()
+        if #suffix >= 2 then
+            local found = false
+            for i, s in ipairs(Config.DeprioritySuffixes) do
+                if s == suffix then
+                    table.remove(Config.DeprioritySuffixes, i)
+                    table.insert(removedSuffixes, suffix)
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                table.insert(notFound, suffix)
+            end
+        end
+    end
+    
+    if #removedSuffixes > 0 then
+        SaveConfig()
+        DPAddBox.Text = ""
+        UpdateDeprioCountLabel()
+        forceUpdateList = true
+        ShowToast("Removed " .. #removedSuffixes .. " suffix(es): " .. table.concat(removedSuffixes, ", "), "success")
+    end
+    
+    if #notFound > 0 then
+        ShowToast("Not in depriority list: " .. table.concat(notFound, ", "), "warning")
+    end
+end)
+
+-- Enter key support
+DPAddBox.FocusLost:Connect(function(enter)
+    if enter then
+        DPAddBtn.MouseButton1Click:Fire()
+    end
+end)
+
+-- Button click handler
+SuffixDeprioBtn.MouseButton1Click:Connect(function()
+    DeprioFrame.Visible = not DeprioFrame.Visible
+    DeprioFrame.Parent = nil
+    DeprioFrame.Parent = ScreenGui
+    if DeprioFrame.Visible then 
+        UpdateDeprioCountLabel()
+        DPAddBox.Text = ""
+        DPAddBox:ReleaseFocus()
+    end
 end)
 
 -- =============================================
@@ -1427,6 +1553,7 @@ UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local BlacklistFile = "blacklist.txt"
 
+-- Load blacklist from file
 local function LoadBlacklistFromFile()
     local loaded = {}
     if isfile and isfile(BlacklistFile) then
@@ -1443,6 +1570,7 @@ local function LoadBlacklistFromFile()
     return loaded
 end
 
+-- Save blacklist to file
 local function SaveBlacklistToFile()
     if not writefile then return end
     local lines = {}
@@ -1454,6 +1582,7 @@ local function SaveBlacklistToFile()
     pcall(function() writefile(BlacklistFile, content) end)
 end
 
+-- Load existing blacklist from file (overrides Config.TrapPrefixes for word blocking)
 local fileBlacklist = LoadBlacklistFromFile()
 for word, _ in pairs(fileBlacklist) do
     Blacklist[word] = true
@@ -1650,6 +1779,7 @@ AWClose.Position = UDim2.new(1, -35, 0, 0)
 AWClose.BackgroundTransparency = 1
 AWClose.MouseButton1Click:Connect(function() AddWordsFrame.Visible = false end)
 
+-- Word input box (centered, simplified placeholder)
 local AWAddBox = Instance.new("TextBox", AddWordsFrame)
 AWAddBox.Font = Enum.Font.Gotham
 AWAddBox.TextSize = 12
@@ -1666,6 +1796,8 @@ AWAddBox.TextWrapped = true
 AWAddBox.TextXAlignment = Enum.TextXAlignment.Center
 AWAddBox.TextYAlignment = Enum.TextYAlignment.Center
 
+-- ===== ADD BUTTONS (Top row) =====
+-- Add to Fallback button
 local AWFallbackAddBtn = Instance.new("TextButton", AddWordsFrame)
 AWFallbackAddBtn.Text = "+ Fallback"
 AWFallbackAddBtn.Font = Enum.Font.GothamBold
@@ -1676,6 +1808,7 @@ AWFallbackAddBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWFallbackAddBtn.Position = UDim2.new(0, 10, 0, 105)
 Instance.new("UICorner", AWFallbackAddBtn).CornerRadius = UDim.new(0, 6)
 
+-- Add to Both button
 local AWBothAddBtn = Instance.new("TextButton", AddWordsFrame)
 AWBothAddBtn.Text = "+ Both"
 AWBothAddBtn.Font = Enum.Font.GothamBold
@@ -1686,6 +1819,7 @@ AWBothAddBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWBothAddBtn.Position = UDim2.new(0.25, 0, 0, 105)
 Instance.new("UICorner", AWBothAddBtn).CornerRadius = UDim.new(0, 6)
 
+-- Clear input button
 local AWClearBtn = Instance.new("TextButton", AddWordsFrame)
 AWClearBtn.Text = "Clear"
 AWClearBtn.Font = Enum.Font.GothamBold
@@ -1696,6 +1830,8 @@ AWClearBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWClearBtn.Position = UDim2.new(0.52, 0, 0, 105)
 Instance.new("UICorner", AWClearBtn).CornerRadius = UDim.new(0, 6)
 
+-- ===== REMOVE BUTTONS (Bottom row) =====
+-- Remove from Fallback button
 local AWFallbackRemoveBtn = Instance.new("TextButton", AddWordsFrame)
 AWFallbackRemoveBtn.Text = "- Fallback"
 AWFallbackRemoveBtn.Font = Enum.Font.GothamBold
@@ -1706,6 +1842,7 @@ AWFallbackRemoveBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWFallbackRemoveBtn.Position = UDim2.new(0, 10, 0, 140)
 Instance.new("UICorner", AWFallbackRemoveBtn).CornerRadius = UDim.new(0, 6)
 
+-- Remove from Both button
 local AWBothRemoveBtn = Instance.new("TextButton", AddWordsFrame)
 AWBothRemoveBtn.Text = "- Both"
 AWBothRemoveBtn.Font = Enum.Font.GothamBold
@@ -1716,6 +1853,7 @@ AWBothRemoveBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWBothRemoveBtn.Position = UDim2.new(0.25, 0, 0, 140)
 Instance.new("UICorner", AWBothRemoveBtn).CornerRadius = UDim.new(0, 6)
 
+-- Refresh button
 local AWRefreshBtn = Instance.new("TextButton", AddWordsFrame)
 AWRefreshBtn.Text = "⟳ Refresh"
 AWRefreshBtn.Font = Enum.Font.GothamBold
@@ -1726,7 +1864,9 @@ AWRefreshBtn.Size = UDim2.new(0.23, -5, 0, 30)
 AWRefreshBtn.Position = UDim2.new(0.52, 0, 0, 140)
 Instance.new("UICorner", AWRefreshBtn).CornerRadius = UDim.new(0, 6)
 
+-- Reload all word lists
 local function ReloadAllWordLists()
+    -- Reload using fetch functions (web + custom)
     local primarySuccess, primaryContent = FetchPrimaryWords()
     LoadPrimaryWords(primaryContent)
     
@@ -1735,6 +1875,7 @@ local function ReloadAllWordLists()
     
     RefreshGiveWordsLookup()
     
+    -- Rebuild buckets with ALL words
     Buckets = {}
     for _, w in ipairs(AllWords) do
         local c = w:sub(1,1) or ""
@@ -1752,6 +1893,7 @@ local function ReloadAllWordLists()
     forceUpdateList = true
 end
 
+-- FullRefresh function
 local function FullRefresh()
     ShowToast("Refreshing word lists...", "warning")
     
@@ -1805,10 +1947,12 @@ local function FullRefresh()
     ShowToast("Refreshed! " .. #PrimaryWords .. " gives, " .. #FallbackWords .. " fallback", "success")
 end
 
+-- Refresh button click handler
 AWRefreshBtn.MouseButton1Click:Connect(function()
     FullRefresh()
 end)
 
+-- Add to Fallback only
 AWFallbackAddBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
     if words == "" or words == "word1, word2, word3..." then
@@ -1826,6 +1970,7 @@ AWFallbackAddBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Add to Both
 AWBothAddBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
     if words == "" or words == "word1, word2, word3..." then
@@ -1848,6 +1993,7 @@ AWBothAddBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Remove from Fallback only
 AWFallbackRemoveBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
     if words == "" or words == "word1, word2, word3..." then
@@ -1865,6 +2011,7 @@ AWFallbackRemoveBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Remove from Both
 AWBothRemoveBtn.MouseButton1Click:Connect(function()
     local words = AWAddBox.Text
     if words == "" or words == "word1, word2, word3..." then
@@ -1887,12 +2034,14 @@ AWBothRemoveBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Enter key support (adds to both as default)
 AWAddBox.FocusLost:Connect(function(enter)
     if enter then
         AWBothAddBtn.MouseButton1Click:Fire()
     end
 end)
 
+-- Button click handler
 ManageWordsBtn.MouseButton1Click:Connect(function()
     AddWordsFrame.Visible = not AddWordsFrame.Visible
     AddWordsFrame.Parent = nil
@@ -1939,6 +2088,7 @@ BLClose.Position = UDim2.new(1, -35, 0, 0)
 BLClose.BackgroundTransparency = 1
 BLClose.MouseButton1Click:Connect(function() BlacklistFrame.Visible = false end)
 
+-- Count label (just shows number, no list)
 local BLCountLabel = Instance.new("TextLabel", BlacklistFrame)
 BLCountLabel.Font = Enum.Font.Gotham
 BLCountLabel.TextSize = 11
@@ -1955,6 +2105,7 @@ local function UpdateCountLabel()
 end
 UpdateCountLabel()
 
+-- Word input box
 local BLAddBox = Instance.new("TextBox", BlacklistFrame)
 BLAddBox.Font = Enum.Font.Gotham
 BLAddBox.TextSize = 12
@@ -1968,6 +2119,7 @@ BLAddBox.TextColor3 = THEME.Text
 BLAddBox.Text = ""
 BLAddBox.ClearTextOnFocus = false
 
+-- Blacklist button
 local BLAddBtn = Instance.new("TextButton", BlacklistFrame)
 BLAddBtn.Text = "Blacklist"
 BLAddBtn.Font = Enum.Font.GothamBold
@@ -1978,6 +2130,7 @@ BLAddBtn.Size = UDim2.new(0.48, -10, 0, 30)
 BLAddBtn.Position = UDim2.new(0, 10, 0, 105)
 Instance.new("UICorner", BLAddBtn).CornerRadius = UDim.new(0, 6)
 
+-- Unblacklist button
 local BLRemoveBtn = Instance.new("TextButton", BlacklistFrame)
 BLRemoveBtn.Text = "Unblacklist"
 BLRemoveBtn.Font = Enum.Font.GothamBold
@@ -1988,6 +2141,7 @@ BLRemoveBtn.Size = UDim2.new(0.48, -10, 0, 30)
 BLRemoveBtn.Position = UDim2.new(0.52, 0, 0, 105)
 Instance.new("UICorner", BLRemoveBtn).CornerRadius = UDim.new(0, 6)
 
+-- Add word to blacklist
 BLAddBtn.MouseButton1Click:Connect(function()
     local input = BLAddBox.Text:lower():gsub("[%s%c]+", "")
     if input == "" then
@@ -2026,6 +2180,8 @@ BLAddBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Remove word from blacklist
+-- Remove word(s) from blacklist (supports commas)
 BLRemoveBtn.MouseButton1Click:Connect(function()
     local input = BLAddBox.Text:lower():gsub("[%s%c]+", "")
     if input == "" then
@@ -2061,12 +2217,14 @@ BLRemoveBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Enter key support - adds word
 BLAddBox.FocusLost:Connect(function(enter)
     if enter then
         BLAddBtn.MouseButton1Click:Fire()
     end
 end)
 
+-- Button click handler
 ServerBrowserBtn.MouseButton1Click:Connect(function()
     BlacklistFrame.Visible = not BlacklistFrame.Visible
     BlacklistFrame.Parent = nil
@@ -2168,6 +2326,7 @@ do
         if eVal == "Ends with..." then eVal = "" end
         eVal = eVal:lower():gsub("[%s%c]+", "")
 
+        -- Parse comma-separated suffixes and maintain order (priority)
         local newSuffixModes = {}
         for part in eVal:gmatch("[^,]+") do
             local clean = part:gsub("[%s%c]+", "")
@@ -2181,14 +2340,15 @@ do
         Config.LengthMode = lVal or 0
         SaveConfig()
         
+        -- Build priority map (lower index = higher priority)
         local suffixPriority = {}
         for idx, s in ipairs(Config.SuffixModes) do
             suffixPriority[s] = idx
         end
 
-        local priorityResults = {}
+        local priorityResults = {}  -- priority level -> list of words
         local MAX_RESULTS = 200
-        local seenWords = {}
+        local seenWords = {}  -- Track seen words across all priorities
         
         local function getWordPriority(w)
             local bestPriority = 999
@@ -2207,6 +2367,7 @@ do
             return (lVal == nil or lVal == 0) or (#w == lVal)
         end
         
+        -- If no suffixes, just show all words alphabetically
         if #Config.SuffixModes == 0 then
             local allWords = {}
             for _, w in ipairs(PrimaryWords) do
@@ -2270,8 +2431,10 @@ do
             return
         end
         
+        -- WITH SUFFIXES: Collect ALL words from BOTH sources
         local allCandidates = {}
         
+        -- Add Primary words
         for _, w in ipairs(PrimaryWords) do
             if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
                 local priority = getWordPriority(w)
@@ -2284,6 +2447,7 @@ do
             end
         end
         
+        -- Add Fallback words
         for _, w in ipairs(FallbackWords) do
             if not Blacklist[w] and not UsedWords[w] and matchesLength(w) then
                 local priority = getWordPriority(w)
@@ -2296,6 +2460,7 @@ do
             end
         end
         
+        -- Group by priority
         for _, candidate in ipairs(allCandidates) do
             local p = candidate.priority
             if not priorityResults[p] then
@@ -2304,15 +2469,17 @@ do
             table.insert(priorityResults[p], candidate.word)
         end
         
+        -- Sort results by priority FIRST, then by length within each priority
         local sortedResults = {}
         local priorities = {}
         for p, _ in pairs(priorityResults) do
             table.insert(priorities, p)
         end
-        table.sort(priorities)
+        table.sort(priorities)  -- Sort priorities (lower number = higher priority)
         
         for _, p in ipairs(priorities) do
             local group = priorityResults[p]
+            -- Sort each priority group by length (shortest first), then alphabetically
             table.sort(group, function(a, b) 
                 if #a ~= #b then 
                     return #a < #b 
@@ -2326,6 +2493,7 @@ do
             if #sortedResults >= MAX_RESULTS then break end
         end
         
+        -- Display results
         local displayLimit = math.min(200, #sortedResults)
         if displayLimit == 0 then
             ShowToast("No words found ending with: " .. eVal, "warning")
@@ -2365,16 +2533,17 @@ do
             lbl.BackgroundTransparency = 1
             lbl.TextXAlignment = Enum.TextXAlignment.Left
             
+            -- Color code based on which suffix priority it matches
             local matchedPriority = getWordPriority(w)
             if matchedPriority < 999 then
                 if matchedPriority == 1 then
-                    lbl.TextColor3 = THEME.Success
+                    lbl.TextColor3 = THEME.Success  -- Green for priority 1
                 elseif matchedPriority == 2 then
-                    lbl.TextColor3 = THEME.Warning
+                    lbl.TextColor3 = THEME.Warning  -- Yellow for priority 2
                 elseif matchedPriority == 3 then
-                    lbl.TextColor3 = THEME.Accent
+                    lbl.TextColor3 = THEME.Accent   -- Blue for priority 3
                 else
-                    lbl.TextColor3 = Color3.fromRGB(200, 150, 255)
+                    lbl.TextColor3 = Color3.fromRGB(200, 150, 255)  -- Purple for others
                 end
             end
         end
@@ -2408,20 +2577,18 @@ do
     end)
 end
 
--- =============================================
--- SERVER BROWSER
--- =============================================
+-- Additional button
+local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
+ServerBrowserBtn.Text = "Server Browser"
+ServerBrowserBtn.Font = Enum.Font.GothamMedium
+ServerBrowserBtn.TextSize = 11
+ServerBrowserBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
+ServerBrowserBtn.BackgroundColor3 = THEME.Background
+ServerBrowserBtn.Size = UDim2.new(0, 130, 0, 24)
+ServerBrowserBtn.Position = UDim2.new(0, 150, 0, 125)
+Instance.new("UICorner", ServerBrowserBtn).CornerRadius = UDim.new(0, 4)
 
-local ServerBrowserBtn2 = Instance.new("TextButton", TogglesFrame)
-ServerBrowserBtn2.Text = "Server Browser"
-ServerBrowserBtn2.Font = Enum.Font.GothamMedium
-ServerBrowserBtn2.TextSize = 11
-ServerBrowserBtn2.TextColor3 = Color3.fromRGB(100, 200, 255)
-ServerBrowserBtn2.BackgroundColor3 = THEME.Background
-ServerBrowserBtn2.Size = UDim2.new(0, 130, 0, 24)
-ServerBrowserBtn2.Position = UDim2.new(0, 150, 0, 95)
-Instance.new("UICorner", ServerBrowserBtn2).CornerRadius = UDim.new(0, 4)
-
+-- Then create the Server Browser Frame
 local ServerFrame = Instance.new("Frame", ScreenGui)
 ServerFrame.Name = "ServerBrowser"
 ServerFrame.Size = UDim2.new(0, 350, 0, 400)
@@ -2481,7 +2648,8 @@ local SBRefresh = Instance.new("TextButton", ServerFrame)
 SBRefresh.Text = "Refresh"
 SBRefresh.Font = Enum.Font.GothamBold
 SBRefresh.TextSize = 12
-SBRefresh.BackgroundColor3 = THEME.AccentSBRefresh.Size = UDim2.new(0.5, -15, 0, 30)
+SBRefresh.BackgroundColor3 = THEME.Accent
+SBRefresh.Size = UDim2.new(0.5, -15, 0, 30)
 SBRefresh.Position = UDim2.new(0.5, 5, 1, -40)
 Instance.new("UICorner", SBRefresh).CornerRadius = UDim.new(0, 6)
 
@@ -2564,16 +2732,12 @@ end)
 
 SBRefresh.MouseButton1Click:Connect(FetchServers)
 
-ServerBrowserBtn2.MouseButton1Click:Connect(function()
+ServerBrowserBtn.MouseButton1Click:Connect(function()
     ServerFrame.Visible = not ServerFrame.Visible
     ServerFrame.Parent = nil
     ServerFrame.Parent = ScreenGui
     if ServerFrame.Visible then FetchServers() end
 end)
-
--- =============================================
--- PRIORITY WORDS FRAME
--- =============================================
 
 local PriorityFrame = Instance.new("Frame", ScreenGui)
 PriorityFrame.Name = "PriorityFrame"
@@ -2607,6 +2771,7 @@ PClose.Position = UDim2.new(1, -35, 0, 0)
 PClose.BackgroundTransparency = 1
 PClose.MouseButton1Click:Connect(function() PriorityFrame.Visible = false end)
 
+-- Prefix input
 local PPrefixBox = Instance.new("TextBox", PriorityFrame)
 PPrefixBox.Font = Enum.Font.Gotham
 PPrefixBox.TextSize = 12
@@ -2619,6 +2784,7 @@ PPrefixBox.PlaceholderColor3 = THEME.SubText
 PPrefixBox.TextColor3 = THEME.Text
 PPrefixBox.Text = ""
 
+-- Words input
 local PWordsBox = Instance.new("TextBox", PriorityFrame)
 PWordsBox.Font = Enum.Font.Gotham
 PWordsBox.TextSize = 12
@@ -2632,6 +2798,7 @@ PWordsBox.TextColor3 = THEME.Text
 PWordsBox.Text = ""
 PWordsBox.TextWrapped = true
 
+-- Buttons
 local PAddBtn = Instance.new("TextButton", PriorityFrame)
 PAddBtn.Text = "+ Add Words"
 PAddBtn.Font = Enum.Font.GothamBold
@@ -2662,6 +2829,7 @@ PDeletePrefixBtn.Size = UDim2.new(0.32, -5, 0, 30)
 PDeletePrefixBtn.Position = UDim2.new(0.68, 0, 0, 145)
 Instance.new("UICorner", PDeletePrefixBtn).CornerRadius = UDim.new(0, 6)
 
+-- List of existing prefixes
 local PListLabel = Instance.new("TextLabel", PriorityFrame)
 PListLabel.Text = "Existing Prefixes:"
 PListLabel.Font = Enum.Font.Gotham
@@ -2709,6 +2877,7 @@ local function RefreshPriorityList()
     PListBox.CanvasSize = UDim2.new(0, 0, 0, PListLayout.AbsoluteContentSize.Y)
 end
 
+-- Add words
 PAddBtn.MouseButton1Click:Connect(function()
     local prefix = PPrefixBox.Text
     local words = PWordsBox.Text
@@ -2734,6 +2903,7 @@ PAddBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Remove words
 PRemoveBtn.MouseButton1Click:Connect(function()
     local prefix = PPrefixBox.Text
     local words = PWordsBox.Text
@@ -2758,6 +2928,7 @@ PRemoveBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Delete entire prefix
 PDeletePrefixBtn.MouseButton1Click:Connect(function()
     local prefix = PPrefixBox.Text
     if prefix == "" or not PriorityWords[prefix] then
@@ -2774,6 +2945,7 @@ PDeletePrefixBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Show frame
 PriorityBtn.MouseButton1Click:Connect(function()
     PriorityFrame.Visible = not PriorityFrame.Visible
     PriorityFrame.Parent = nil
@@ -2785,16 +2957,17 @@ PriorityBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- Load priority words on startup
 LoadPriorityWords()
 
 -- =============================================
--- MAIN UPDATE LIST FUNCTION (with SUFFIX LAST)
+-- MAIN UPDATE LIST FUNCTION (UPDATED WITH DEPRIORITY)
 -- =============================================
 
 local lastRequiredLetter = ""
 
 UpdateList = function(detectedText, requiredLetter)
-    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode) .. "|" .. sortMode
+    local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. tostring(lengthMode) .. "|" .. sortMode .. "|" .. table.concat(Config.DeprioritySuffixes or {}, ",")
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
 
@@ -2824,8 +2997,19 @@ UpdateList = function(detectedText, requiredLetter)
 
     local prefixLen = #searchPrefix
     local suffixList = Config.SuffixModes or {}
+    local deprioritySuffixes = Config.DeprioritySuffixes or {}
     
-    -- Collect all prefix matching words
+    -- Function to check if a word ends with ANY depriority suffix
+    local function isDeprioritized(word)
+        for _, suffix in ipairs(deprioritySuffixes) do
+            if #word >= #suffix and word:sub(-#suffix) == suffix then
+                return true
+            end
+        end
+        return false
+    end
+    
+    -- ========== COLLECT ALL PREFIX MATCHING WORDS (NO LIMIT) ==========
     local prefixMatchingWords = {}
     local bucket = firstChar and Buckets[firstChar] or AllWords
     
@@ -2841,7 +3025,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- Step 1: Find shortest word
+    -- ========== STEP 1: Find shortest word (from prefix matches) ==========
     local shortestWord = nil
     local shortestLen = math.huge
     for _, w in ipairs(prefixMatchingWords) do
@@ -2859,15 +3043,40 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- Step 2: Get priority words (custom per prefix)
-    local priorityWords = {}
-    local priorityWordsLookup = {}
+    -- ========== STEP 2: Find suffix priority words (must start with prefix AND end with suffix) ==========
+    local suffixWords = {}
     local usedInPriority = {}
     if shortestWord then usedInPriority[shortestWord] = true end
+
+    for _, suffix in ipairs(suffixList) do
+        local bestSuffixWord = nil
+        local shortestLen = math.huge
+        
+        for _, w in ipairs(prefixMatchingWords) do
+            if not usedInPriority[w] then
+                if #w >= #suffix and w:sub(-#suffix) == suffix then
+                    if #w < shortestLen then
+                        shortestLen = #w
+                        bestSuffixWord = w
+                    end
+                end
+            end
+        end
+        
+        if bestSuffixWord then
+            table.insert(suffixWords, bestSuffixWord)
+            usedInPriority[bestSuffixWord] = true
+        end
+    end
+    
+    -- ========== STEP 3: Get PRIORITY WORDS (custom words for this specific prefix) ==========
+    local priorityWords = {}
+    local priorityWordsLookup = {}
     
     if searchPrefix and searchPrefix ~= "" and PriorityWords[searchPrefix] then
         local priorityList = GetPriorityWordsForPrefix(searchPrefix)
         for _, w in ipairs(priorityList) do
+            -- Check if word exists in our word lists and matches prefix exactly
             local wordExists = false
             for _, existing in ipairs(prefixMatchingWords) do
                 if existing == w then
@@ -2881,14 +3090,15 @@ UpdateList = function(detectedText, requiredLetter)
                 usedInPriority[w] = true
             end
         end
+        -- Sort priority words by length (shortest first)
         table.sort(priorityWords, function(a, b) return #a < #b end)
     end
     
-    -- Step 3: Separate remaining into GIVE, SUFFIX (to be last), and FALLBACK
-    local giveWords = {}
-    local suffixWords = {}  -- Words ending with suffixes go LAST (after give/progives)
-    local fallbackWords = {}
+    -- ========== STEP 4: Separate remaining into NORMAL and DEPRIORITIZED ==========
+    local normalWords = {}
+    local deprioWords = {}
 
+    -- Function to check if a word is a "give" word (from gives.txt or pro.txt)
     local function IsGiveWord(word)
         if sortMode == "Pro" then
             return ProWordsLookup[word] == true
@@ -2896,35 +3106,30 @@ UpdateList = function(detectedText, requiredLetter)
             return GiveWordsLookup[word] == true
         end
     end
-    
-    local function HasSuffix(word)
-        for _, suffix in ipairs(suffixList) do
-            if #word >= #suffix and word:sub(-#suffix) == suffix then
-                return true
-            end
-        end
-        return false
-    end
 
     for _, w in ipairs(prefixMatchingWords) do
         if not usedInPriority[w] then
-            if HasSuffix(w) then
-                table.insert(suffixWords, w)
-            elseif IsGiveWord(w) then
-                table.insert(giveWords, w)
+            if isDeprioritized(w) then
+                table.insert(deprioWords, w)
             else
-                table.insert(fallbackWords, w)
+                table.insert(normalWords, w)
             end
         end
     end
     
-    -- Sort suffix words by length (shortest first, then alphabetically)
-    table.sort(suffixWords, function(a, b)
-        if #a ~= #b then return #a < #b end
-        return a < b
-    end)
+    -- ========== STEP 5: Split NORMAL words into GIVE and FALLBACK ==========
+    local giveWords = {}
+    local fallbackWords = {}
     
-    -- Sort GIVE words based on mode
+    for _, w in ipairs(normalWords) do
+        if IsGiveWord(w) then
+            table.insert(giveWords, w)
+        else
+            table.insert(fallbackWords, w)
+        end
+    end
+    
+    -- ========== STEP 6: Sort GIVE words based on mode ==========
     local sortedGive = {}
 
     if sortMode == "Strategic" then
@@ -3012,7 +3217,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
 
-    -- Sort FALLBACK words
+    -- ========== STEP 7: Sort FALLBACK words ==========
     local sortedFallback = {}
 
     if sortMode == "Strategic" then
@@ -3060,11 +3265,29 @@ UpdateList = function(detectedText, requiredLetter)
         sortedFallback = fallbackWords
     end
     
-    -- Build final result ORDER: Shortest -> Priority -> Give -> Suffix (last) -> Fallback
+    -- ========== STEP 8: Sort DEPRIORITY words (shortest first within deprio group) ==========
+    local sortedDeprio = {}
+    table.sort(deprioWords, function(a, b) return #a < #b end)
+    sortedDeprio = deprioWords
+    
+    -- ========== STEP 9: Build final result ORDER: Shortest → Suffix → Priority → Give → Fallback → Depriority ==========
     local matches = {}
     
+    -- #1: Shortest word overall
     if shortestWord then table.insert(matches, shortestWord) end
     
+    -- #2: Suffix priority words (in order)
+    for _, w in ipairs(suffixWords) do
+        local duplicate = false
+        for _, existing in ipairs(matches) do
+            if existing == w then duplicate = true; break end
+        end
+        if not duplicate then
+            table.insert(matches, w)
+        end
+    end
+    
+    -- #3: PRIORITY WORDS (custom words for current prefix)
     for _, w in ipairs(priorityWords) do
         if #matches >= 40 then break end
         local duplicate = false
@@ -3076,36 +3299,42 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
+    -- #4: Give words (ALL of them up to 40)
     for _, w in ipairs(sortedGive) do
         if #matches >= 40 then break end
         table.insert(matches, w)
     end
     
-    -- Suffix words go LAST (after give/progives)
-    for _, w in ipairs(suffixWords) do
-        if #matches >= 40 then break end
-        table.insert(matches, w)
-    end
-    
+    -- #5: Fallback words (ALL of them up to 40)
     for _, w in ipairs(sortedFallback) do
         if #matches >= 40 then break end
         table.insert(matches, w)
     end
     
+    -- #6: DEPRIORITY words (ALWAYS LAST, regardless of mode)
+    for _, w in ipairs(sortedDeprio) do
+        if #matches >= 40 then break end
+        table.insert(matches, w)
+    end
+    
+    -- Display results (limit to 15 visible buttons)
     local displayList = {}
     for i = 1, math.min(15, #matches) do
         table.insert(displayList, matches[i])
     end
     
+    -- Update status
     if #matches > 0 then
         currentBestMatch = matches[1]
         local modeText = (sortMode == "Pro") and "PRO" or ""
-        local suffixText = (#suffixList > 0) and " (suffix last)" or ""
-        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. modeText .. suffixText
+        local deprioCount = #sortedDeprio
+        local deprioText = (deprioCount > 0) and " | " .. deprioCount .. " deprioritized" or ""
+        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. modeText .. deprioText
         StatusText.TextColor3 = THEME.Success
         Tween(StatusDot, {BackgroundColor3 = THEME.Success})
     end
     
+    -- Update buttons
     local giveWordsLookupLocal = GiveWordsLookup
     
     for i = 1, math.max(#displayList, #ButtonCache) do
@@ -3201,7 +3430,10 @@ UpdateList = function(detectedText, requiredLetter)
                 accentRGB = "100,200,255"
             end
             
-            if priorityWordsLookup[w] then
+            -- Highlight depriority words with a different color (orange)
+            if isDeprioritized(w) then
+                accentRGB = "255,150,50"
+            elseif priorityWordsLookup[w] then
                 accentRGB = "90,230,206"
             end
 
@@ -3247,7 +3479,7 @@ MinBtn.MouseButton1Click:Connect(function()
 end)
 
 -- =============================================
--- STATS OVERLAY (DISABLED)
+-- STATS OVERLAY (DISABLED - No errors)
 -- =============================================
 
 local StatsData = {
@@ -3283,6 +3515,8 @@ runConn = RunService.Heartbeat:Connect(function()
                 isVisible = frame.Parent.Visible
             end
         end
+
+        -- Timer removed
 
         local isMyTurn, requiredLetter = GetTurnInfo(frame)
 
@@ -3320,12 +3554,15 @@ runConn = RunService.Heartbeat:Connect(function()
                 Tween(StatusDot, {BackgroundColor3 = THEME.Warning})
             end
             
+            -- Still allow manual search even when censored
             if SearchBox and SearchBox.Text ~= "" then
+                -- Let manual search work
                 if listUpdatePending and (now - lastInputTime > LIST_DEBOUNCE) then
                     listUpdatePending = false
                     UpdateList(lastDetected, lastRequiredLetter)
                 end
             else
+                -- Only clear buttons if no manual search
                 for _, btn in ipairs(ButtonCache) do btn.Visible = false end
                 listUpdatePending = false
                 forceUpdateList = false
@@ -3418,4 +3655,4 @@ inputConn = UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == TOGGLE_KEY then ScreenGui.Enabled = not ScreenGui.Enabled end
 end)
 
-ShowToast("Yoshi loaded! Priority: Shortest → Priority → Give/Pro → Suffix (last) → Fallback", "success")
+ShowToast("Yoshi loaded! Priority: Shortest → Suffix → Priority Words → Give → Fallback → Depriority Suffixes", "success")
