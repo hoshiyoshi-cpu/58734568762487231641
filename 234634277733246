@@ -118,15 +118,20 @@ end)
 local localAppData = os.getenv("LOCALAPPDATA")
 local myScriptFolder = localAppData .. "\\YoshiWordHelper\\"
 
+if makefolder then
+    pcall(function() makefolder(myScriptFolder) end)
+elseif make_dir then  -- Some executors use this
+    pcall(function() make_dir(myScriptFolder) end)
+end
+
 local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
-local fileName = "yinglish.txt"
+local fileName = myScriptFolder .. "yinglish.txt"
 local givesFileName = myScriptFolder .. "gives_cached.txt"
-local CustomAddedFile = "customadded.txt"
+local CustomAddedFile = myScriptFolder .. "customadded.txt"
 local customFallbackFile = myScriptFolder .. "customfallback.txt"
 local customGivesFile = myScriptFolder .. "customgives.txt"
-local PriorityFile = myScriptFolder .. "priority.txt"
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -1218,8 +1223,8 @@ PriorityBtn.Size = UDim2.new(0, 130, 0, 24)
 PriorityBtn.Position = UDim2.new(0, 15, 0, 95)
 Instance.new("UICorner", PriorityBtn).CornerRadius = UDim.new(0, 4)
 
-local ServerBrowserBtn = Instance.new("TextButton", TogglesFrame)
-ServerBrowserBtn.Text = "Blacklist"
+local BlacklistBtn = Instance.new("TextButton", TogglesFrame)
+BlacklistBtn.Text = "Blacklist"
 ServerBrowserBtn.Font = Enum.Font.GothamMedium
 ServerBrowserBtn.TextSize = 11
 ServerBrowserBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
@@ -1994,7 +1999,7 @@ BLAddBox.FocusLost:Connect(function(enter)
 end)
 
 -- Button click handler
-ServerBrowserBtn.MouseButton1Click:Connect(function()
+BlacklistBtn.MouseButton1Click:Connect(function()
     BlacklistFrame.Visible = not BlacklistFrame.Visible
     BlacklistFrame.Parent = nil
     BlacklistFrame.Parent = ScreenGui
