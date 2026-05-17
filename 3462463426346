@@ -3458,119 +3458,104 @@ local function SaveDeprio()
     if writefile then writefile(DeprioFile, table.concat(DeprioritySuffixes, "\n")) end
 end
 
--- Create the button
+-- Add button to existing settings panel
 local DeprioBtn = Instance.new("TextButton", TogglesFrame)
 DeprioBtn.Text = "Suffix Deprio"
 DeprioBtn.Font = Enum.Font.GothamMedium
 DeprioBtn.TextSize = 11
-DeprioBtn.TextColor3 = Color3.fromRGB(255, 150, 50)
+DeprioBtn.TextColor3 = Color3.fromRGB(255,150,50)
 DeprioBtn.BackgroundColor3 = THEME.Background
 DeprioBtn.Size = UDim2.new(0, 130, 0, 24)
 DeprioBtn.Position = UDim2.new(0, 150, 0, 95)
 Instance.new("UICorner", DeprioBtn).CornerRadius = UDim.new(0, 4)
 
--- Create a simple frame for input (NO GetCoreObject)
-local DeprioFrame = Instance.new("Frame", ScreenGui)
-DeprioFrame.Name = "DeprioInputFrame"
-DeprioFrame.Size = UDim2.new(0, 300, 0, 140)
-DeprioFrame.Position = UDim2.new(0.5, -150, 0.5, -70)
-DeprioFrame.BackgroundColor3 = THEME.Background
-DeprioFrame.Visible = false
-DeprioFrame.ClipsDescendants = true
-EnableDragging(DeprioFrame)
-Instance.new("UICorner", DeprioFrame).CornerRadius = UDim.new(0, 8)
-local DFrameStroke = Instance.new("UIStroke", DeprioFrame)
-DFrameStroke.Color = Color3.fromRGB(255, 150, 50)
-DFrameStroke.Thickness = 2
+-- Create a simple popup frame (similar to your other windows)
+local DeprioPopup = Instance.new("Frame", ScreenGui)
+DeprioPopup.Name = "DeprioPopup"
+DeprioPopup.Size = UDim2.new(0, 280, 0, 130)
+DeprioPopup.Position = UDim2.new(0.5, -140, 0.5, -65)
+DeprioPopup.BackgroundColor3 = THEME.Background
+DeprioPopup.Visible = false
+DeprioPopup.ClipsDescendants = true
+EnableDragging(DeprioPopup)
+Instance.new("UICorner", DeprioPopup).CornerRadius = UDim.new(0, 8)
+local PopupStroke = Instance.new("UIStroke", DeprioPopup)
+PopupStroke.Color = Color3.fromRGB(255,150,50)
+PopupStroke.Thickness = 2
 
-local DTitle = Instance.new("TextLabel", DeprioFrame)
-DTitle.Text = "Suffix Depriority"
-DTitle.Font = Enum.Font.GothamBold
-DTitle.TextSize = 14
-DTitle.TextColor3 = Color3.fromRGB(255, 150, 50)
-DTitle.Size = UDim2.new(1, 0, 0, 35)
-DTitle.BackgroundTransparency = 1
+local PopupTitle = Instance.new("TextLabel", DeprioPopup)
+PopupTitle.Text = "Suffix Depriority"
+PopupTitle.Font = Enum.Font.GothamBold
+PopupTitle.TextSize = 14
+PopupTitle.TextColor3 = Color3.fromRGB(255,150,50)
+PopupTitle.Size = UDim2.new(1, 0, 0, 35)
+PopupTitle.BackgroundTransparency = 1
 
-local DClose = Instance.new("TextButton", DeprioFrame)
-DClose.Text = "X"
-DClose.Font = Enum.Font.GothamBold
-DClose.TextSize = 16
-DClose.TextColor3 = Color3.fromRGB(255, 100, 100)
-DClose.Size = UDim2.new(0, 35, 0, 35)
-DClose.Position = UDim2.new(1, -35, 0, 0)
-DClose.BackgroundTransparency = 1
-DClose.MouseButton1Click:Connect(function() DeprioFrame.Visible = false end)
+local PopupClose = Instance.new("TextButton", DeprioPopup)
+PopupClose.Text = "X"
+PopupClose.Font = Enum.Font.GothamBold
+PopupClose.TextSize = 16
+PopupClose.TextColor3 = Color3.fromRGB(255,100,100)
+PopupClose.Size = UDim2.new(0, 35, 0, 35)
+PopupClose.Position = UDim2.new(1, -35, 0, 0)
+PopupClose.BackgroundTransparency = 1
+PopupClose.MouseButton1Click:Connect(function() DeprioPopup.Visible = false end)
 
-local DCount = Instance.new("TextLabel", DeprioFrame)
-DCount.Font = Enum.Font.Gotham
-DCount.TextSize = 11
-DCount.TextColor3 = THEME.SubText
-DCount.Size = UDim2.new(1, -20, 0, 20)
-DCount.Position = UDim2.new(0, 10, 0, 40)
-DCount.BackgroundTransparency = 1
-DCount.TextXAlignment = Enum.TextXAlignment.Left
+local PopupInput = Instance.new("TextBox", DeprioPopup)
+PopupInput.Font = Enum.Font.Gotham
+PopupInput.TextSize = 12
+PopupInput.BackgroundColor3 = THEME.ItemBG
+PopupInput.Size = UDim2.new(0.9, 0, 0, 35)
+PopupInput.Position = UDim2.new(0.05, 0, 0, 45)
+Instance.new("UICorner", PopupInput).CornerRadius = UDim.new(0, 6)
+PopupInput.PlaceholderText = "ing,ed,tion,ly"
+PopupInput.PlaceholderColor3 = THEME.SubText
+PopupInput.TextColor3 = THEME.Text
+PopupInput.Text = table.concat(DeprioritySuffixes, ",")
+PopupInput.ClearTextOnFocus = false
 
-local DInput = Instance.new("TextBox", DeprioFrame)
-DInput.Font = Enum.Font.Gotham
-DInput.TextSize = 12
-DInput.BackgroundColor3 = THEME.ItemBG
-DInput.Size = UDim2.new(1, -20, 0, 35)
-DInput.Position = UDim2.new(0, 10, 0, 65)
-Instance.new("UICorner", DInput).CornerRadius = UDim.new(0, 6)
-DInput.PlaceholderText = "Suffixes: ing,ed,tion,ly"
-DInput.PlaceholderColor3 = THEME.SubText
-DInput.TextColor3 = THEME.Text
-DInput.Text = table.concat(DeprioritySuffixes, ",")
-DInput.ClearTextOnFocus = false
+local PopupSave = Instance.new("TextButton", DeprioPopup)
+PopupSave.Text = "Save"
+PopupSave.Font = Enum.Font.GothamBold
+PopupSave.TextSize = 12
+PopupSave.BackgroundColor3 = THEME.Success
+PopupSave.TextColor3 = THEME.Background
+PopupSave.Size = UDim2.new(0.4, -10, 0, 28)
+PopupSave.Position = UDim2.new(0.05, 0, 1, -38)
+Instance.new("UICorner", PopupSave).CornerRadius = UDim.new(0, 6)
 
-local DSave = Instance.new("TextButton", DeprioFrame)
-DSave.Text = "Save"
-DSave.Font = Enum.Font.GothamBold
-DSave.TextSize = 12
-DSave.BackgroundColor3 = THEME.Success
-DSave.TextColor3 = THEME.Background
-DSave.Size = UDim2.new(0.48, -10, 0, 30)
-DSave.Position = UDim2.new(0, 10, 0, 108)
-Instance.new("UICorner", DSave).CornerRadius = UDim.new(0, 6)
+local PopupCancel = Instance.new("TextButton", DeprioPopup)
+PopupCancel.Text = "Cancel"
+PopupCancel.Font = Enum.Font.GothamBold
+PopupCancel.TextSize = 12
+PopupCancel.BackgroundColor3 = THEME.ItemBG
+PopupCancel.TextColor3 = THEME.Text
+PopupCancel.Size = UDim2.new(0.4, -10, 0, 28)
+PopupCancel.Position = UDim2.new(0.55, 0, 1, -38)
+Instance.new("UICorner", PopupCancel).CornerRadius = UDim.new(0, 6)
 
-local DCancel = Instance.new("TextButton", DeprioFrame)
-DCancel.Text = "Cancel"
-DCancel.Font = Enum.Font.GothamBold
-DCancel.TextSize = 12
-DCancel.BackgroundColor3 = THEME.ItemBG
-DCancel.TextColor3 = THEME.Text
-DCancel.Size = UDim2.new(0.48, -10, 0, 30)
-DCancel.Position = UDim2.new(0.52, 0, 0, 108)
-Instance.new("UICorner", DCancel).CornerRadius = UDim.new(0, 6)
-
-local function UpdateDeprioDisplay()
-    DCount.Text = #DeprioritySuffixes .. " suffix(s) deprioritized (always last)"
-    DInput.Text = table.concat(DeprioritySuffixes, ",")
-end
-UpdateDeprioDisplay()
-
-DSave.MouseButton1Click:Connect(function()
+PopupSave.MouseButton1Click:Connect(function()
     DeprioritySuffixes = {}
-    for part in DInput.Text:gmatch("[^,]+") do
+    for part in PopupInput.Text:gmatch("[^,]+") do
         local s = part:gsub("[%s%c]+", ""):lower()
         if #s >= 2 then
             table.insert(DeprioritySuffixes, s)
         end
     end
     SaveDeprio()
-    UpdateDeprioDisplay()
-    DeprioFrame.Visible = false
+    DeprioPopup.Visible = false
     forceUpdateList = true
-    ShowToast("Depriority suffixes saved! " .. #DeprioritySuffixes .. " suffixes", "success")
+    ShowToast(#DeprioritySuffixes .. " depriority suffixes saved", "success")
 end)
 
-DCancel.MouseButton1Click:Connect(function()
-    DeprioFrame.Visible = false
+PopupCancel.MouseButton1Click:Connect(function()
+    DeprioPopup.Visible = false
+    PopupInput.Text = table.concat(DeprioritySuffixes, ",")
 end)
 
 DeprioBtn.MouseButton1Click:Connect(function()
-    UpdateDeprioDisplay()
-    DeprioFrame.Visible = true
+    PopupInput.Text = table.concat(DeprioritySuffixes, ",")
+    DeprioPopup.Visible = true
 end)
 
 ShowToast("Yoshi loaded! Priority: Shortest word → Suffix words → Give words → Fallback words", "success")
