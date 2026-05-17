@@ -118,12 +118,6 @@ end)
 local localAppData = os.getenv("LOCALAPPDATA")
 local myScriptFolder = localAppData .. "\\YoshiWordHelper\\"
 
-if makefolder then
-    pcall(function() makefolder(myScriptFolder) end)
-elseif make_dir then  -- Some executors use this
-    pcall(function() make_dir(myScriptFolder) end)
-end
-
 local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
