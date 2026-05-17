@@ -2874,34 +2874,16 @@ UpdateList = function(detectedText, requiredLetter)
         table.sort(priorityWords, function(a, b) return #a < #b end)
     end
     
-    -- ========== STEP 4: Separate remaining into PRO GIVE, REGULAR GIVE, and FALLBACK ==========
-    local proGiveWords = {}
-    local regularGiveWords = {}
+    -- ========== STEP 4: Separate remaining into GIVE and FALLBACK ==========
+    local giveWords = {}
     local fallbackWords = {}
 
-    if sortMode == "Pro" then
-        -- Pro mode: Separate into Pro gives, Regular gives, then Fallback
-        for _, w in ipairs(prefixMatchingWords) do
-            if not usedInPriority[w] then
-                if ProWordsLookup[w] then
-                    table.insert(proGiveWords, w)
-                elseif GiveWordsLookup[w] then
-                    table.insert(regularGiveWords, w)
-                else
-                    table.insert(fallbackWords, w)
-                end
-            end
-        end
-    else
-        -- Normal mode: Just gives and fallback
-        for _, w in ipairs(prefixMatchingWords) do
-            if not usedInPriority[w] then
-                if GiveWordsLookup[w] then
-                    table.insert(regularGiveWords, w)
-                else
-                    table.insert(fallbackWords, w)
-                end
-            end
+    -- Use Pro words if in Pro mode, otherwise use regular gives
+    local function IsGiveWord(word)
+        if sortMode == "Pro" then
+            return ProWordsLookup[word] == true
+        else
+            return GiveWordsLookup[word] == true
         end
     end
 
@@ -2918,122 +2900,87 @@ UpdateList = function(detectedText, requiredLetter)
     -- ========== STEP 5: Sort GIVE words based on mode ==========
     local sortedGive = {}
 
-    if sortMode == "Pro" then
-        -- Sort Pro gives first (using same logic as Strategic/Smart)
-        local sortedProGive = {}
-        local sortedRegularGive = {}
+    if sortMode == "Strategic" then
+        local shortGives = {}
+        local longGives = {}
         
-        -- Sort Pro gives (priority 1)
-        if #proGiveWords > 0 then
-            if sortMode == "Pro" then
-                -- Use Strategic logic for Pro words
-                local shortGives = {}
-                local longGives = {}
-                for _, w in ipairs(proGiveWords) do
-                    local len = #w
-                    if len >= 4 and len <= 7 then
-                        table.insert(shortGives, w)
-                    else
-                        table.insert(longGives, w)
-                    end
-                end
-                for i = #shortGives, 2, -1 do local j = math.random(i) shortGives[i], shortGives[j] = shortGives[j], shortGives[i] end
-                for i = #longGives, 2, -1 do local j = math.random(i) longGives[i], longGives[j] = longGives[j], longGives[i] end
-                for _, w in ipairs(shortGives) do table.insert(sortedProGive, w) end
-                for _, w in ipairs(longGives) do table.insert(sortedProGive, w) end
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if len >= 4 and len <= 7 then
+                table.insert(shortGives, w)
+            else
+                table.insert(longGives, w)
             end
         end
         
-        -- Sort regular gives (priority 2)
-        if #regularGiveWords > 0 then
-            if sortMode == "Pro" then
-                local shortGives = {}
-                local longGives = {}
-                for _, w in ipairs(regularGiveWords) do
-                    local len = #w
-                    if len >= 4 and len <= 7 then
-                        table.insert(shortGives, w)
-                    else
-                        table.insert(longGives, w)
-                    end
-                end
-                for i = #shortGives, 2, -1 do local j = math.random(i) shortGives[i], shortGives[j] = shortGives[j], shortGives[i] end
-                for i = #longGives, 2, -1 do local j = math.random(i) longGives[i], longGives[j] = longGives[j], longGives[i] end
-                for _, w in ipairs(shortGives) do table.insert(sortedRegularGive, w) end
-                for _, w in ipairs(longGives) do table.insert(sortedRegularGive, w) end
+        for i = #shortGives, 2, -1 do
+            local j = math.random(i)
+            shortGives[i], shortGives[j] = shortGives[j], shortGives[i]
+        end
+        
+        for i = #longGives, 2, -1 do
+            local j = math.random(i)
+            longGives[i], longGives[j] = longGives[j], longGives[i]
+        end
+        
+        for _, w in ipairs(shortGives) do table.insert(sortedGive, w) end
+        for _, w in ipairs(longGives) do table.insert(sortedGive, w) end
+        
+    elseif sortMode == "Smart" then
+        local mediumGive = {}
+        local shortGive = {}
+        local longGive = {}
+        
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if len >= 6 and len <= 9 then
+                table.insert(mediumGive, w)
+            elseif len <= 5 then
+                table.insert(shortGive, w)
+            else
+                table.insert(longGive, w)
             end
         end
         
-        -- Combine: Pro gives first, then regular gives
-        for _, w in ipairs(sortedProGive) do table.insert(sortedGive, w) end
-        for _, w in ipairs(sortedRegularGive) do table.insert(sortedGive, w) end
+        for i = #mediumGive, 2, -1 do local j = math.random(i) mediumGive[i], mediumGive[j] = mediumGive[j], mediumGive[i] end
+        for i = #shortGive, 2, -1 do local j = math.random(i) shortGive[i], shortGive[j] = shortGive[j], shortGive[i] end
+        for i = #longGive, 2, -1 do local j = math.random(i) longGive[i], longGive[j] = longGive[j], longGive[i] end
         
-    else
-        -- Normal mode sorting (your existing code)
-        if sortMode == "Strategic" then
-            local shortGives = {}
-            local longGives = {}
-            for _, w in ipairs(regularGiveWords) do
-                local len = #w
-                if len >= 4 and len <= 7 then
-                    table.insert(shortGives, w)
-                else
-                    table.insert(longGives, w)
-                end
+        for _, w in ipairs(mediumGive) do table.insert(sortedGive, w) end
+        for _, w in ipairs(shortGive) do table.insert(sortedGive, w) end
+        for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
+        
+    elseif sortMode == "Random" then
+        for i = #giveWords, 2, -1 do
+            local j = math.random(i)
+            giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
+        end
+        sortedGive = giveWords
+    else  -- "Shortest"
+        local lengthGroups = {}
+        
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if not lengthGroups[len] then
+                lengthGroups[len] = {}
             end
-            for i = #shortGives, 2, -1 do local j = math.random(i) shortGives[i], shortGives[j] = shortGives[j], shortGives[i] end
-            for i = #longGives, 2, -1 do local j = math.random(i) longGives[i], longGives[j] = longGives[j], longGives[i] end
-            for _, w in ipairs(shortGives) do table.insert(sortedGive, w) end
-            for _, w in ipairs(longGives) do table.insert(sortedGive, w) end
-        elseif sortMode == "Smart" then
-            local mediumGive = {}
-            local shortGive = {}
-            local longGive = {}
-            for _, w in ipairs(regularGiveWords) do
-                local len = #w
-                if len >= 6 and len <= 9 then
-                    table.insert(mediumGive, w)
-                elseif len <= 5 then
-                    table.insert(shortGive, w)
-                else
-                    table.insert(longGive, w)
-                end
-            end
-            for i = #mediumGive, 2, -1 do local j = math.random(i) mediumGive[i], mediumGive[j] = mediumGive[j], mediumGive[i] end
-            for i = #shortGive, 2, -1 do local j = math.random(i) shortGive[i], shortGive[j] = shortGive[j], shortGive[i] end
-            for i = #longGive, 2, -1 do local j = math.random(i) longGive[i], longGive[j] = longGive[j], longGive[i] end
-            for _, w in ipairs(mediumGive) do table.insert(sortedGive, w) end
-            for _, w in ipairs(shortGive) do table.insert(sortedGive, w) end
-            for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
-        elseif sortMode == "Random" then
-            for i = #regularGiveWords, 2, -1 do
+            table.insert(lengthGroups[len], w)
+        end
+        
+        local sortedLengths = {}
+        for len, _ in pairs(lengthGroups) do
+            table.insert(sortedLengths, len)
+        end
+        table.sort(sortedLengths)
+        
+        for _, len in ipairs(sortedLengths) do
+            local group = lengthGroups[len]
+            for i = #group, 2, -1 do
                 local j = math.random(i)
-                regularGiveWords[i], regularGiveWords[j] = regularGiveWords[j], regularGiveWords[i]
+                group[i], group[j] = group[j], group[i]
             end
-            sortedGive = regularGiveWords
-        else  -- "Shortest"
-            local lengthGroups = {}
-            for _, w in ipairs(regularGiveWords) do
-                local len = #w
-                if not lengthGroups[len] then
-                    lengthGroups[len] = {}
-                end
-                table.insert(lengthGroups[len], w)
-            end
-            local sortedLengths = {}
-            for len, _ in pairs(lengthGroups) do
-                table.insert(sortedLengths, len)
-            end
-            table.sort(sortedLengths)
-            for _, len in ipairs(sortedLengths) do
-                local group = lengthGroups[len]
-                for i = #group, 2, -1 do
-                    local j = math.random(i)
-                    group[i], group[j] = group[j], group[i]
-                end
-                for _, w in ipairs(group) do
-                    table.insert(sortedGive, w)
-                end
+            for _, w in ipairs(group) do
+                table.insert(sortedGive, w)
             end
         end
     end
@@ -3136,13 +3083,8 @@ UpdateList = function(detectedText, requiredLetter)
     -- Update status
     if #matches > 0 then
         currentBestMatch = matches[1]
-        if sortMode == "Pro" then
-            local proCount = #proGiveWords
-            local regularCount = #regularGiveWords
-            StatusText.Text = "Found " .. #matches .. " words (Pro: " .. proCount .. ", Give: " .. regularCount .. ")"
-        else
-            StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'"
-        end
+        local modeText = (sortMode == "Pro") and "PRO" or ""
+        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. modeText
         StatusText.TextColor3 = THEME.Success
         Tween(StatusDot, {BackgroundColor3 = THEME.Success})
     end
