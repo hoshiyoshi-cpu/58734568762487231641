@@ -2896,10 +2896,10 @@ UpdateList = function(detectedText, requiredLetter)
 
     for _, w in ipairs(allMatchingWords) do
         if not usedInOrder[w] then
-            if IsGiveWord(w) then
-                table.insert(giveWords, w)
-            elseif hasDeprioritySuffix(w) then
+            if hasDeprioritySuffix(w) then          -- check depriority FIRST
                 table.insert(depriorityWords, w)
+            elseif IsGiveWord(w) then
+                table.insert(giveWords, w)
             else
                 table.insert(fallbackWords, w)
             end
