@@ -115,24 +115,15 @@ logConn = LogService.MessageOut:Connect(function(message, type)
     end
 end)
 
--- ========== FILE PATHS ==========
-local MyFolder = "C:\\Yoshi\\"  -- Change this to your desired folder
-
--- Create folder if it doesn't exist
-if makefolder then
-    pcall(function() makefolder(MyFolder) end)
-end
-
 local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
-local fileName = MyFolder .. "yinglish.txt"
-local givesFileName = MyFolder .. "gives_cached.txt"
-local CustomAddedFile = MyFolder .. "customadded.txt"
-local customFallbackFile = MyFolder .. "customfallback.txt"  
-local customGivesFile = MyFolder .. "customgives.txt"
-local BlacklistFile = MyFolder .. "blacklist.txt"
-local PriorityFile = MyFolder .. "priority.txt"
+local fileName = "yinglish.txt"
+local givesFileName = "gives_cached.txt"
+local CustomAddedFile = "customadded.txt"
+local customFallbackFile = "customfallback.txt"  
+local customGivesFile = "customgives.txt"      
+local PriorityFile = "C:\\Users\\USER\\AppData\\Local\\Xeno\\workspace\\priority.txt"
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -1326,7 +1317,7 @@ local UWLayout = Instance.new("UIListLayout", UWList)
 UWLayout.Padding = UDim.new(0, 2)
 UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local BlacklistFile = "C:\\Users\\USER\\AppData\\Local\\Xeno\\workspace\\blacklist.txt"
+local BlacklistFile = "blacklist.txt"
 
 -- Load blacklist from file
 local function LoadBlacklistFromFile()
