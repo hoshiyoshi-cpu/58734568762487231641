@@ -2899,7 +2899,7 @@ UpdateList = function(detectedText, requiredLetter)
         table.sort(priorityWords, function(a, b) return #a < #b end)
     end
     
-    -- STEP 4: Separate remaining into GIVE, DEPRIORITIZED (suffix_priority.txt), and FALLBACK
+    -- STEP 4: Separate remaining into GIVE, DEPRIORITIZED, and FALLBACK
     local giveWords = {}
     local deprioritizedWords = {}
     local fallbackWords = {}
@@ -3014,15 +3014,17 @@ UpdateList = function(detectedText, requiredLetter)
 
     -- STEP 6: Sort DEPRIORITIZED words (these go AFTER give words)
     local sortedDeprioritized = {}
-    if sortMode == "Random" then
-        for i = #deprioritizedWords, 2, -1 do
-            local j = math.random(i)
-            deprioritizedWords[i], deprioritizedWords[j] = deprioritizedWords[j], deprioritizedWords[i]
+    if #deprioritizedWords > 0 then
+        if sortMode == "Random" then
+            for i = #deprioritizedWords, 2, -1 do
+                local j = math.random(i)
+                deprioritizedWords[i], deprioritizedWords[j] = deprioritizedWords[j], deprioritizedWords[i]
+            end
+            sortedDeprioritized = deprioritizedWords
+        else
+            table.sort(deprioritizedWords, function(a,b) return #a < #b end)
+            sortedDeprioritized = deprioritizedWords
         end
-        sortedDeprioritized = deprioritizedWords
-    else
-        table.sort(deprioritizedWords, function(a,b) return #a < #b end)
-        sortedDeprioritized = deprioritizedWords
     end
     
     -- STEP 7: Sort FALLBACK words (absolute last)
