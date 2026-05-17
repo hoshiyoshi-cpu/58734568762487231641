@@ -2742,7 +2742,7 @@ end)
 LoadPriorityWords()
 
 -- =============================================
--- MAIN UPDATE LIST FUNCTION (DEPRIORITY AFFECTS SORTING ONLY, ALL MODES)
+-- MAIN UPDATE LIST FUNCTION (DEPRIORITY OVERRIDES ALL RANDOMIZERS)
 -- =============================================
 
 local lastRequiredLetter = ""
@@ -2780,12 +2780,6 @@ UpdateList = function(detectedText, requiredLetter)
     local prioritySuffixes = Config.SuffixModes or {}
     local deprioritySuffixes = Config.DepriorityModes or {}
     
-    -- Build priority map for ranking
-    local priorityMap = {}
-    for idx, s in ipairs(prioritySuffixes) do
-        priorityMap[s] = idx
-    end
-    
     -- Function to check if a word ends with ANY depriority suffix
     local function hasDeprioritySuffix(w)
         for _, s in ipairs(deprioritySuffixes) do
@@ -2796,21 +2790,17 @@ UpdateList = function(detectedText, requiredLetter)
         return false
     end
     
-    -- Function to get priority rank (lower number = higher priority)
-    local function getPriorityRank(w)
-        local bestRank = 999
+    -- Function to check if a word has priority suffix
+    local function hasPrioritySuffix(w)
         for _, s in ipairs(prioritySuffixes) do
             if #w >= #s and w:sub(-#s) == s then
-                local r = priorityMap[s] or 999
-                if r < bestRank then
-                    bestRank = r
-                end
+                return true
             end
         end
-        return bestRank
+        return false
     end
     
-    -- COLLECT ALL prefix-matching words (NO FILTERING by suffix!)
+    -- COLLECT ALL prefix-matching words (NO FILTERING)
     local allMatchingWords = {}
     local bucket = firstChar and Buckets[firstChar] or AllWords
     
@@ -2826,7 +2816,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 1: Find shortest word (ignores all suffix rules) ==========
+    -- Find shortest word (ignores all suffix rules)
     local shortestWord = nil
     local shortestLen = math.huge
     for _, w in ipairs(allMatchingWords) do
@@ -2844,11 +2834,11 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- Track used words so we don't duplicate
+    -- Track used words
     local usedInOrder = {}
     if shortestWord then usedInOrder[shortestWord] = true end
     
-    -- ========== STEP 2: Priority suffix words (only if they exist in the list) ==========
+    -- Priority suffix words (in order of suffixes)
     local prioritySuffixWords = {}
     for _, suffix in ipairs(prioritySuffixes) do
         local bestForSuffix = nil
@@ -2871,7 +2861,7 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 3: Custom priority words (from priority.txt) ==========
+    -- Custom priority words
     local customPriorityWords = {}
     if searchPrefix and searchPrefix ~= "" and PriorityWords[searchPrefix] then
         local priorityList = GetPriorityWordsForPrefix(searchPrefix)
@@ -2891,7 +2881,7 @@ UpdateList = function(detectedText, requiredLetter)
         table.sort(customPriorityWords, function(a, b) return #a < #b end)
     end
     
-    -- ========== STEP 4: Separate remaining words ==========
+    -- Separate remaining words into GIVE, DEPRIORITY, and FALLBACK
     local giveWords = {}
     local depriorityWords = {}
     local fallbackWords = {}
@@ -2908,21 +2898,21 @@ UpdateList = function(detectedText, requiredLetter)
         if not usedInOrder[w] then
             if IsGiveWord(w) then
                 table.insert(giveWords, w)
+            elseif hasDeprioritySuffix(w) then
+                table.insert(depriorityWords, w)
             else
-                -- Check if this word should be deprioritized
-                if hasDeprioritySuffix(w) then
-                    table.insert(depriorityWords, w)
-                else
-                    table.insert(fallbackWords, w)
-                end
+                table.insert(fallbackWords, w)
             end
         end
     end
     
-    -- ========== STEP 5: Sort GIVE words based on mode ==========
+    -- ========== SORT EACH CATEGORY ACCORDING TO MODE ==========
+    
+    -- Sort GIVE words based on mode (but depriority words will go to bottom AFTER this)
     local sortedGive = {}
-
+    
     if sortMode == "Strategic" then
+        -- Strategic: 4-7 letters first, then others, both randomized
         local shortGives = {}
         local longGives = {}
         
@@ -2935,11 +2925,11 @@ UpdateList = function(detectedText, requiredLetter)
             end
         end
         
+        -- Randomize both groups
         for i = #shortGives, 2, -1 do
             local j = math.random(i)
             shortGives[i], shortGives[j] = shortGives[j], shortGives[i]
         end
-        
         for i = #longGives, 2, -1 do
             local j = math.random(i)
             longGives[i], longGives[j] = longGives[j], longGives[i]
@@ -2949,6 +2939,7 @@ UpdateList = function(detectedText, requiredLetter)
         for _, w in ipairs(longGives) do table.insert(sortedGive, w) end
         
     elseif sortMode == "Smart" then
+        -- Smart: 6-9 letters first, then <=5, then >9, all randomized
         local mediumGive = {}
         local shortGive = {}
         local longGive = {}
@@ -2973,38 +2964,35 @@ UpdateList = function(detectedText, requiredLetter)
         for _, w in ipairs(longGive) do table.insert(sortedGive, w) end
         
     elseif sortMode == "Random" then
+        -- Pure random
         for i = #giveWords, 2, -1 do
             local j = math.random(i)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    else  -- "Shortest" or "Pro" or any other mode
+    else  -- "Shortest" or "Pro"
         -- Sort by length (shortest first)
         table.sort(giveWords, function(a, b) return #a < #b end)
         sortedGive = giveWords
     end
-
-    -- ========== STEP 6: Sort DEPRIORITY words (shortest first, then randomize within same length) ==========
+    
+    -- Sort DEPRIORITY words (shortest first, then randomize same length)
     local sortedDepriority = {}
-    -- First sort by length
-    table.sort(depriorityWords, function(a, b) 
-        if #a ~= #b then return #a < #b end
-        return a < b
-    end)
-    -- Then randomize within the same length groups
-    local lengthGroups = {}
+    -- Group by length
+    local deprioLengthGroups = {}
     for _, w in ipairs(depriorityWords) do
         local len = #w
-        if not lengthGroups[len] then lengthGroups[len] = {} end
-        table.insert(lengthGroups[len], w)
+        if not deprioLengthGroups[len] then deprioLengthGroups[len] = {} end
+        table.insert(deprioLengthGroups[len], w)
     end
-    local sortedLengths = {}
-    for len, _ in pairs(lengthGroups) do
-        table.insert(sortedLengths, len)
+    local deprioLengths = {}
+    for len, _ in pairs(deprioLengthGroups) do
+        table.insert(deprioLengths, len)
     end
-    table.sort(sortedLengths)
-    for _, len in ipairs(sortedLengths) do
-        local group = lengthGroups[len]
+    table.sort(deprioLengths)
+    for _, len in ipairs(deprioLengths) do
+        local group = deprioLengthGroups[len]
+        -- Randomize within same length
         for i = #group, 2, -1 do
             local j = math.random(i)
             group[i], group[j] = group[j], group[i]
@@ -3014,28 +3002,23 @@ UpdateList = function(detectedText, requiredLetter)
         end
     end
     
-    -- ========== STEP 7: Sort FALLBACK words based on mode ==========
+    -- Sort FALLBACK words based on mode
     local sortedFallback = {}
-
+    
     if sortMode == "Strategic" then
-        local lengthGroups = {}
-        
+        local fbLengthGroups = {}
         for _, w in ipairs(fallbackWords) do
             local len = #w
-            if not lengthGroups[len] then
-                lengthGroups[len] = {}
-            end
-            table.insert(lengthGroups[len], w)
+            if not fbLengthGroups[len] then fbLengthGroups[len] = {} end
+            table.insert(fbLengthGroups[len], w)
         end
-        
-        local sortedLengths = {}
-        for len, _ in pairs(lengthGroups) do
-            table.insert(sortedLengths, len)
+        local fbLengths = {}
+        for len, _ in pairs(fbLengthGroups) do
+            table.insert(fbLengths, len)
         end
-        table.sort(sortedLengths)
-        
-        for _, len in ipairs(sortedLengths) do
-            local group = lengthGroups[len]
+        table.sort(fbLengths)
+        for _, len in ipairs(fbLengths) do
+            local group = fbLengthGroups[len]
             for i = #group, 2, -1 do
                 local j = math.random(i)
                 group[i], group[j] = group[j], group[i]
@@ -3052,7 +3035,6 @@ UpdateList = function(detectedText, requiredLetter)
         end
         sortedFallback = fallbackWords
     elseif sortMode == "Smart" then
-        -- For Smart mode, fallback just gets randomized
         for i = #fallbackWords, 2, -1 do
             local j = math.random(i)
             fallbackWords[i], fallbackWords[j] = fallbackWords[j], fallbackWords[i]
@@ -3063,8 +3045,7 @@ UpdateList = function(detectedText, requiredLetter)
         sortedFallback = fallbackWords
     end
     
-    -- ========== STEP 8: Build final result ORDER (SAME FOR ALL MODES) ==========
-    -- ORDER: Shortest → Priority Suffix → Custom Priority → Give Words → DEPRIORITY Words → Fallback
+    -- ========== BUILD FINAL ORDER (DEPRIORITY ALWAYS GOES AFTER GIVE, BEFORE FALLBACK) ==========
     local matches = {}
     
     -- #1: Shortest word overall
@@ -3099,7 +3080,7 @@ UpdateList = function(detectedText, requiredLetter)
         table.insert(matches, w)
     end
     
-    -- #5: DEPRIORITY words (pushed to bottom, before fallback)
+    -- #5: DEPRIORITY words (ALWAYS go here, after give, before fallback)
     for _, w in ipairs(sortedDepriority) do
         if #matches >= 40 then break end
         table.insert(matches, w)
@@ -3224,19 +3205,11 @@ UpdateList = function(detectedText, requiredLetter)
                 accentRGB = "100,200,255"  -- Blue for third
             end
             
-            -- Color coding for different word types
-            local isPrioritySuffixWord = false
-            for _, s in ipairs(prioritySuffixes) do
-                if #w >= #s and w:sub(-#s) == s then
-                    isPrioritySuffixWord = true
-                    break
-                end
-            end
-            
-            if isPrioritySuffixWord then
-                accentRGB = "90,230,206"  -- Cyan for priority suffix words
-            elseif hasDeprioritySuffix(w) then
+            -- Color coding for depriority words (orange)
+            if hasDeprioritySuffix(w) then
                 accentRGB = "255,150,100"  -- Orange for depriority words
+            elseif hasPrioritySuffix(w) then
+                accentRGB = "90,230,206"   -- Cyan for priority suffix words
             end
 
             local textRGB = ColorToRGB(THEME.Text)
