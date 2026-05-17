@@ -115,15 +115,22 @@ logConn = LogService.MessageOut:Connect(function(message, type)
     end
 end)
 
+local localAppData = os.getenv("LOCALAPPDATA")
+local myScriptFolder = localAppData .. "\\YoshiWordHelper\\"
+
+if makefolder then
+    pcall(function() makefolder(myScriptFolder) end)
+end
+
 local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
 local fileName = "yinglish.txt"
-local givesFileName = "gives_cached.txt"
+local givesFileName = myScriptFolder .. "gives_cached.txt"
 local CustomAddedFile = "customadded.txt"
-local customFallbackFile = "customfallback.txt"  
-local customGivesFile = "customgives.txt"      
-local PriorityFile = "priority.txt"
+local customFallbackFile = myScriptFolder .. "customfallback.txt"
+local customGivesFile = myScriptFolder .. "customgives.txt"
+local PriorityFile = myScriptFolder .. "priority.txt"
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -207,7 +214,7 @@ end
 -- PRIORITY WORDS FUNCTIONS
 -- =============================================
 
-local PriorityFile = "priority.txt"
+local PriorityFile = myScriptFolder .. "priority.txt"
 
 -- Load priority words from file
 local function LoadPriorityWords()
@@ -1317,7 +1324,7 @@ local UWLayout = Instance.new("UIListLayout", UWList)
 UWLayout.Padding = UDim.new(0, 2)
 UWLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local BlacklistFile = "blacklist.txt"
+local BlacklistFile = myScriptFolder .. "blacklist.txt"
 
 -- Load blacklist from file
 local function LoadBlacklistFromFile()
