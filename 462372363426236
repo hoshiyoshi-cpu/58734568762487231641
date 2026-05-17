@@ -123,6 +123,9 @@ local CustomAddedFile = "customadded.txt"
 local customFallbackFile = "customfallback.txt"  
 local customGivesFile = "customgives.txt"      
 local PriorityFile = "priority.txt"
+local proGivesFile = "progives.txt"  -- Local file for Pro mode
+local ProWords = {}  -- Storage for Pro words
+local ProWordsLookup = {}  -- Quick lookup
 
 -- Separate storage for PRIMARY and FALLBACK words
 local PrimaryWords = {}
@@ -205,6 +208,28 @@ end
 -- =============================================
 -- PRIORITY WORDS FUNCTIONS
 -- =============================================
+
+local function LoadProWords()
+    ProWords = {}
+    ProWordsLookup = {}
+    
+    if isfile and isfile(proGivesFile) then
+        local success, content = pcall(function() return readfile(proGivesFile) end)
+        if success and content then
+            for line in content:gmatch("[^\r\n]+") do
+                local clean = line:gsub("[%s%c]+", ""):lower()
+                if #clean > 0 then
+                    table.insert(ProWords, clean)
+                    ProWordsLookup[clean] = true
+                end
+            end
+        end
+    end
+    
+    UpdateStatus("Loaded " .. #ProWords .. " PRO words from local file!", THEME.Success)
+end
+
+LoadProWords()
 
 local PriorityFile = "priority.txt"
 
@@ -1146,6 +1171,8 @@ local SortBtn = CreateToggle("Sort: "..sortMode, UDim2.new(0, 15, 0, 5), UDim2.n
         sortMode = "Smart"
     elseif sortMode == "Smart" then
         sortMode = "Strategic"
+    elseif sortMode == "Strategic" then
+        sortMode = "Pro"  -- ADD THIS
     else
         sortMode = "Shortest"
     end
@@ -2850,10 +2877,19 @@ UpdateList = function(detectedText, requiredLetter)
     -- ========== STEP 4: Separate remaining into GIVE and FALLBACK ==========
     local giveWords = {}
     local fallbackWords = {}
-    
+
+    -- Use Pro words if in Pro mode, otherwise use regular gives
+    local function IsGiveWord(word)
+        if sortMode == "Pro" then
+            return ProWordsLookup[word] == true
+        else
+            return GiveWordsLookup[word] == true
+        end
+    end
+
     for _, w in ipairs(prefixMatchingWords) do
         if not usedInPriority[w] then
-            if GiveWordsLookup[w] then
+            if IsGiveWord(w) then
                 table.insert(giveWords, w)
             else
                 table.insert(fallbackWords, w)
@@ -3047,9 +3083,8 @@ UpdateList = function(detectedText, requiredLetter)
     -- Update status
     if #matches > 0 then
         currentBestMatch = matches[1]
-        local priorityCount = #priorityWords
-        local priorityInfo = (priorityCount > 0) and " (" .. priorityCount .. " priority)" or ""
-        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. priorityInfo
+        local modeText = (sortMode == "Pro") and "PRO" or ""
+        StatusText.Text = "Found " .. #matches .. " words starting with '" .. searchPrefix .. "'" .. modeText
         StatusText.TextColor3 = THEME.Success
         Tween(StatusDot, {BackgroundColor3 = THEME.Success})
     end
