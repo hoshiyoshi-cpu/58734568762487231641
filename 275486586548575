@@ -116,7 +116,7 @@ logConn = LogService.MessageOut:Connect(function(message, type)
 end)
 
 -- ========== FILE PATHS ==========
-local MyFolder = "C:\\Yoshi"  -- Change this to your desired folder
+local MyFolder = "C:\\Yoshi\\"  -- Change this to your desired folder
 
 -- Create folder if it doesn't exist
 if makefolder then
