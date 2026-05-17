@@ -1,13 +1,3 @@
---[[
-    YOSHI - Word Helper with Discord Bot Strategy
-    PRIORITY ORDER:
-    1. Shortest word overall (any source)
-    2. Shortest word for each priority suffix (in order)
-    3. Give words (gives.txt) - 6-9 letters prioritized for Smart/Random mode
-    4. Fallback words (lastletter.txt)
---]]
-
-local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 
