@@ -127,7 +127,7 @@ logConn = LogService.MessageOut:Connect(function(message, type)
     end
 end)
 
-local filename = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
+local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
 local fileName = "yinglish.txt"
