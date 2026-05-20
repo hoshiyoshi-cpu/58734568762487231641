@@ -127,7 +127,7 @@ logConn = LogService.MessageOut:Connect(function(message, type)
     end
 end)
 
-local url = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt"
+local fallbackUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt" 
 local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
 local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
 local fileName = "yinglish.txt"
@@ -452,7 +452,7 @@ end
 local function FetchFallbackWords()
     UpdateStatus("Fetching FALLBACK word list from web...", THEME.Warning)
     local success, res = pcall(function()
-        return request({Url = fileName, Method = "GET"})
+        return request({Url = fallbackUrl, Method = "GET"})
     end)
     
     local onlineWords = {}
