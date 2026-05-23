@@ -220,13 +220,6 @@ local function LoadProWords()
                 if #clean > 0 then
                     table.insert(ProWords, clean)
                     ProWordsLookup[clean] = true
-                    
-                    -- CRITICAL: Add PRO words to PrimaryWords so they can be found!
-                    if not SeenWords or not SeenWords[clean] then
-                        table.insert(PrimaryWords, clean)
-                        table.insert(AllWords, clean)
-                        if SeenWords then SeenWords[clean] = true end
-                    end
                 end
             end
         end
@@ -1641,14 +1634,6 @@ local function FullRefresh()
     
     local fallbackSuccess, fallbackContent = FetchFallbackWords()
     LoadFallbackWords(fallbackContent)
-        -- Merge PRO words into PrimaryWords
-    for _, word in ipairs(ProWords) do
-        if not PrimaryWords[word] and not SeenWords[word] then
-            table.insert(PrimaryWords, word)
-            table.insert(AllWords, word)
-            SeenWords[word] = true
-        end
-    end
     
     RefreshGiveWordsLookup()
     
