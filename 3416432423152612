@@ -595,6 +595,9 @@ FetchTrapsAndGives()
 task.wait(0.5)
 LoadAllWords()
 
+-- Load PRO words AFTER all words are loaded so they get merged correctly
+LoadProWords()
+
 if LoadingGui then LoadingGui:Destroy() end
 
 RefreshGiveWordsLookup()
@@ -1641,7 +1644,8 @@ local function FullRefresh()
     
     local fallbackSuccess, fallbackContent = FetchFallbackWords()
     LoadFallbackWords(fallbackContent)
-        -- Merge PRO words into PrimaryWords
+    
+    -- Merge PRO words into PrimaryWords (only once!)
     for _, word in ipairs(ProWords) do
         if not PrimaryWords[word] and not SeenWords[word] then
             table.insert(PrimaryWords, word)
@@ -1650,8 +1654,10 @@ local function FullRefresh()
         end
     end
     
+    -- CRITICAL: Refresh lookup AFTER merging PRO words
     RefreshGiveWordsLookup()
     
+    -- Rebuild buckets
     Buckets = {}
     for _, w in ipairs(AllWords) do
         local c = w:sub(1,1) or ""
