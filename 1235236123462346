@@ -3013,19 +3013,31 @@ UpdateList = function(detectedText, requiredLetter)
         sortedGive = giveWords
         
     elseif sortMode == "Pro" then
-        -- PRO MODE: Sort ALL words by length (shortest first)
-        -- PRO words from progives.txt get priority over regular gives.txt words
-        table.sort(giveWords, function(a, b) 
-            if #a ~= #b then 
-                return #a < #b 
+        -- PRO MODE: Separate PRO words and regular GIVE words
+        local proOnly = {}
+        local regularGive = {}
+        
+        for _, w in ipairs(giveWords) do
+            if ProWordsLookup[w] then
+                table.insert(proOnly, w)
+            else
+                table.insert(regularGive, w)
             end
-            -- If same length, PRO words come before regular gives.txt words
-            if ProWordsLookup[a] ~= ProWordsLookup[b] then
-                return ProWordsLookup[a]  -- PRO words first
-            end
-            return a < b
-        end)
-        sortedGive = giveWords
+        end
+        
+        -- Sort PRO words by length (shortest first)
+        table.sort(proOnly, function(a, b) return #a < #b end)
+        -- Sort regular GIVE words by length (shortest first)
+        table.sort(regularGive, function(a, b) return #a < #b end)
+        
+        -- Combine: PRO words first, then regular GIVE words
+        sortedGive = {}
+        for _, w in ipairs(proOnly) do
+            table.insert(sortedGive, w)
+        end
+        for _, w in ipairs(regularGive) do
+            table.insert(sortedGive, w)
+        end
         
     else  -- "Shortest" mode (default)
         -- Sort by length (shortest first)
