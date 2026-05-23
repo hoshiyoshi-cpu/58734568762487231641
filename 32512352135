@@ -2927,7 +2927,10 @@ UpdateList = function(detectedText, requiredLetter)
 
     for _, w in ipairs(allMatchingWords) do
         if not usedInOrder[w] then
-            if hasDeprioritySuffix(w) then          -- check depriority FIRST
+            -- PRO words always get highest priority, skip depriority check
+            if sortMode == "Pro" and ProWordsLookup[w] then
+                table.insert(giveWords, w)
+            elseif hasDeprioritySuffix(w) then
                 table.insert(depriorityWords, w)
             elseif IsGiveWord(w) then
                 table.insert(giveWords, w)
