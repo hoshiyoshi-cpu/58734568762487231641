@@ -2749,6 +2749,10 @@ LoadPriorityWords()
 local lastRequiredLetter = ""
 
 UpdateList = function(detectedText, requiredLetter)
+
+    local ProWordsLookup = ProWordsLookup
+    local GiveWordsLookup = GiveWordsLookup
+
     local hash = (detectedText or "") .. "|" .. (requiredLetter or "") .. "|" .. (SearchBox.Text or "") .. "|" .. suffixMode .. "|" .. depriorityMode .. "|" .. tostring(lengthMode) .. "|" .. sortMode
     if hash == lastUpdateHash and not forceUpdateList then return end
     lastUpdateHash = hash
@@ -2889,7 +2893,12 @@ UpdateList = function(detectedText, requiredLetter)
 
     local function IsGiveWord(word)
         if sortMode == "Pro" then
-            return ProWordsLookup[word] == true
+            -- PRIORITY 1: progives.txt words
+            if ProWordsLookup[word] then
+                return true
+            end
+            -- PRIORITY 2: gives.txt words
+            return GiveWordsLookup[word] == true
         else
             return GiveWordsLookup[word] == true
         end
@@ -2911,7 +2920,7 @@ UpdateList = function(detectedText, requiredLetter)
     
     -- Sort GIVE words based on mode (but depriority words will go to bottom AFTER this)
     local sortedGive = {}
-    
+
     if sortMode == "Strategic" then
         -- Strategic: 4-7 letters first, then others, both randomized
         local shortGives = {}
@@ -2971,7 +2980,23 @@ UpdateList = function(detectedText, requiredLetter)
             giveWords[i], giveWords[j] = giveWords[j], giveWords[i]
         end
         sortedGive = giveWords
-    else  -- "Shortest" or "Pro"
+        
+    elseif sortMode == "Pro" then
+        -- PRO MODE: Sort ALL words by length (shortest first)
+        -- PRO words from progives.txt get priority over regular gives.txt words
+        table.sort(giveWords, function(a, b) 
+            if #a ~= #b then 
+                return #a < #b 
+            end
+            -- If same length, PRO words come before regular gives.txt words
+            if ProWordsLookup[a] ~= ProWordsLookup[b] then
+                return ProWordsLookup[a]  -- PRO words first
+            end
+            return a < b
+        end)
+        sortedGive = giveWords
+        
+    else  -- "Shortest" mode (default)
         -- Sort by length (shortest first)
         table.sort(giveWords, function(a, b) return #a < #b end)
         sortedGive = giveWords
@@ -3137,16 +3162,25 @@ UpdateList = function(detectedText, requiredLetter)
                 lbl.TextXAlignment = Enum.TextXAlignment.Left
                 lbl.RichText = true
 
+                -- Check if this is a PRO word (only in Pro mode)
+                local isProWord = false
+                if sortMode == "Pro" and ProWordsLookup and ProWordsLookup[w] then
+                    isProWord = true
+                end
+
+                -- Add indicator for give words (either PRO or regular)
                 if giveWordsLookupLocal and giveWordsLookupLocal[w] then
                     local giveIndicator = Instance.new("TextLabel", btn)
                     giveIndicator.Name = "GiveIndicator"
                     giveIndicator.Size = UDim2.new(0, 30, 1, 0)
                     giveIndicator.Position = UDim2.new(1, -35, 0, 0)
                     giveIndicator.BackgroundTransparency = 1
-                    giveIndicator.Text = "🎁"
+                    -- Show star for PRO words, gift for regular gives words
+                    giveIndicator.Text = isProWord and "⭐" or "🎁"
                     giveIndicator.Font = Enum.Font.GothamBold
                     giveIndicator.TextSize = 12
-                    giveIndicator.TextColor3 = THEME.Success
+                    -- Gold color for PRO words, green for regular gives
+                    giveIndicator.TextColor3 = isProWord and Color3.fromRGB(255, 215, 0) or THEME.Success
                     giveIndicator.TextXAlignment = Enum.TextXAlignment.Right
                     lbl.Size = UDim2.new(1, -45, 1, 0)
                 end
