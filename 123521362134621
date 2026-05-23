@@ -2927,19 +2927,26 @@ UpdateList = function(detectedText, requiredLetter)
 
     for _, w in ipairs(allMatchingWords) do
         if not usedInOrder[w] then
-            -- PRO words always get highest priority, skip depriority check
-            if sortMode == "Pro" and ProWordsLookup[w] then
-                table.insert(giveWords, w)
-            elseif hasDeprioritySuffix(w) then
-                table.insert(depriorityWords, w)
-            elseif IsGiveWord(w) then
-                table.insert(giveWords, w)
+            if sortMode == "Pro" then
+                -- Pro mode: ignore depriority suffixes completely
+                if IsGiveWord(w) then
+                    table.insert(giveWords, w)
+                else
+                    table.insert(fallbackWords, w)
+                end
             else
-                table.insert(fallbackWords, w)
+                -- Other modes: respect depriority suffixes
+                if hasDeprioritySuffix(w) then
+                    table.insert(depriorityWords, w)
+                elseif IsGiveWord(w) then
+                    table.insert(giveWords, w)
+                else
+                    table.insert(fallbackWords, w)
+                end
             end
         end
     end
-    
+        
     -- ========== SORT EACH CATEGORY ACCORDING TO MODE ==========
     
     -- Sort GIVE words based on mode (but depriority words will go to bottom AFTER this)
@@ -3129,17 +3136,29 @@ UpdateList = function(detectedText, requiredLetter)
         if #matches >= 40 then break end
         table.insert(matches, w)
     end
-    
-    -- #5: DEPRIORITY words (ALWAYS go here, after give, before fallback)
-    for _, w in ipairs(sortedDepriority) do
-        if #matches >= 40 then break end
-        table.insert(matches, w)
-    end
-    
-    -- #6: Fallback words (at the very bottom)
-    for _, w in ipairs(sortedFallback) do
-        if #matches >= 40 then break end
-        table.insert(matches, w)
+
+    -- For Pro mode: depriority words go AFTER fallback (lowest priority)
+    if sortMode == "Pro" then
+        -- #5: Fallback words first (depriority is lowest)
+        for _, w in ipairs(sortedFallback) do
+            if #matches >= 40 then break end
+            table.insert(matches, w)
+        end
+        -- #6: Depriority words (absolute lowest)
+        for _, w in ipairs(sortedDepriority) do
+            if #matches >= 40 then break end
+            table.insert(matches, w)
+        end
+    else
+        -- Other modes: depriority before fallback
+        for _, w in ipairs(sortedDepriority) do
+            if #matches >= 40 then break end
+            table.insert(matches, w)
+        end
+        for _, w in ipairs(sortedFallback) do
+            if #matches >= 40 then break end
+            table.insert(matches, w)
+        end
     end
     
     -- Display results (limit to 15 visible buttons)
