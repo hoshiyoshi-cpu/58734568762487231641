@@ -3040,9 +3040,35 @@ UpdateList = function(detectedText, requiredLetter)
         end
         
     else  -- "Shortest" mode (default)
-        -- Sort by length (shortest first)
-        table.sort(giveWords, function(a, b) return #a < #b end)
-        sortedGive = giveWords
+        -- Group by length, then randomize within each length group
+        local lengthGroups = {}
+        for _, w in ipairs(giveWords) do
+            local len = #w
+            if not lengthGroups[len] then lengthGroups[len] = {} end
+            table.insert(lengthGroups[len], w)
+        end
+        
+        -- Get sorted lengths
+        local lengths = {}
+        for len, _ in pairs(lengthGroups) do
+            table.insert(lengths, len)
+        end
+        table.sort(lengths) -- Sort lengths ascending
+        
+        -- For each length group, randomize and then add to sortedGive
+        sortedGive = {}
+        for _, len in ipairs(lengths) do
+            local group = lengthGroups[len]
+            -- Randomize the group
+            for i = #group, 2, -1 do
+                local j = math.random(i)
+                group[i], group[j] = group[j], group[i]
+            end
+            -- Add all words from this length group
+            for _, w in ipairs(group) do
+                table.insert(sortedGive, w)
+            end
+        end
     end
     
     -- Sort DEPRIORITY words (shortest first, then randomize same length)
