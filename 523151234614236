@@ -127,11 +127,6 @@ logConn = LogService.MessageOut:Connect(function(message, type)
     end
 end)
 
-local fallbackUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/lastletter.txt" 
-local trapsUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/traps.txt"
-local givesUrl = "https://raw.githubusercontent.com/inesbotv1/inesbot/refs/heads/main/gives.txt"
-local fileName = "yinglish.txt"
-local givesFileName = "gives_cached.txt"
 local CustomAddedFile = "customadded.txt"
 local customFallbackFile = "customfallback.txt"  
 local customGivesFile = "customgives.txt"      
@@ -409,32 +404,23 @@ local function SaveCustomWordsToFile(filePath, words)
 end
 
 local function FetchPrimaryWords()
-    UpdateStatus("Fetching PRIMARY word list from web...", THEME.Warning)
-    local success, res = pcall(function()
-        return request({Url = givesUrl, Method = "GET"})
-    end)
+    UpdateStatus("Loading PRIMARY words from local file...", THEME.Warning)
     
     local onlineWords = {}
-    if success and res and res.Body then
-        writefile(givesFileName, res.Body)
-        UpdateStatus("Primary words fetched!", THEME.Success)
-        
-        for w in res.Body:gmatch("[^\r\n]+") do
+    
+    -- Load from local gives.txt file (not the cached one)
+    if isfile and isfile("gives.txt") then
+        local content = readfile("gives.txt")
+        for w in content:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then
                 onlineWords[clean] = true
             end
         end
+        UpdateStatus("Primary words loaded! (" .. #onlineWords .. " words)", THEME.Success)
     else
-        if isfile and isfile(givesFileName) then
-            local content = readfile(givesFileName)
-            for w in content:gmatch("[^\r\n]+") do
-                local clean = w:gsub("[%s%c]+", ""):lower()
-                if #clean > 0 then
-                    onlineWords[clean] = true
-                end
-            end
-        end
+        UpdateStatus("No gives.txt found! Please place it in the same folder.", Color3.fromRGB(255, 80, 80))
+        return false, ""
     end
     
     local customWords = LoadCustomWordsFromFile(customGivesFile)
@@ -452,37 +438,28 @@ local function FetchPrimaryWords()
     
     local mergedContent = table.concat(allPrimaryWords, "\n")
     
-    UpdateStatus("Primary: " .. #onlineWords .. " online + " .. (#allPrimaryWords - #onlineWords) .. " custom = " .. #allPrimaryWords, THEME.Success)
+    UpdateStatus("Primary: " .. #onlineWords .. " + " .. (#allPrimaryWords - #onlineWords) .. " custom = " .. #allPrimaryWords, THEME.Success)
     return true, mergedContent
 end
 
 local function FetchFallbackWords()
-    UpdateStatus("Fetching FALLBACK word list from web...", THEME.Warning)
-    local success, res = pcall(function()
-        return request({Url = fallbackUrl, Method = "GET"})
-    end)
+    UpdateStatus("Loading FALLBACK words from local file...", THEME.Warning)
     
     local onlineWords = {}
-    if success and res and res.Body then
-        writefile(fileName, res.Body)
-        UpdateStatus("Fallback words fetched!", THEME.Success)
-        
-        for w in res.Body:gmatch("[^\r\n]+") do
+    
+    -- Load from local lastletter.txt file
+    if isfile and isfile("lastletter.txt") then
+        local content = readfile("lastletter.txt")
+        for w in content:gmatch("[^\r\n]+") do
             local clean = w:gsub("[%s%c]+", ""):lower()
             if #clean > 0 then
                 onlineWords[clean] = true
             end
         end
+        UpdateStatus("Fallback words loaded! (" .. #onlineWords .. " words)", THEME.Success)
     else
-        if isfile and isfile(fileName) then
-            local content = readfile(fileName)
-            for w in content:gmatch("[^\r\n]+") do
-                local clean = w:gsub("[%s%c]+", ""):lower()
-                if #clean > 0 then
-                    onlineWords[clean] = true
-                end
-            end
-        end
+        UpdateStatus("No lastletter.txt found! Please place it in the same folder.", Color3.fromRGB(255, 80, 80))
+        return false, ""
     end
     
     local customWords = LoadCustomWordsFromFile(customFallbackFile)
@@ -500,26 +477,27 @@ local function FetchFallbackWords()
     
     local mergedContent = table.concat(allFallbackWords, "\n")
     
-    UpdateStatus("Fallback: " .. #onlineWords .. " online + " .. (#allFallbackWords - #onlineWords) .. " custom = " .. #allFallbackWords, THEME.Success)
+    UpdateStatus("Fallback: " .. #onlineWords .. " + " .. (#allFallbackWords - #onlineWords) .. " custom = " .. #allFallbackWords, THEME.Success)
     return true, mergedContent
 end
 
 local function FetchTrapsAndGives()
-    UpdateStatus("Loading trap prefixes...", THEME.Warning)
+    UpdateStatus("Loading trap prefixes from local file...", THEME.Warning)
     
-    local success, trapsRes = pcall(function()
-        return request({Url = trapsUrl, Method = "GET"})
-    end)
-    if success and trapsRes and trapsRes.Body then
+    -- Load from local traps.txt file
+    if isfile and isfile("traps.txt") then
+        local content = readfile("traps.txt")
         Config.TrapPrefixes = {}
-        for line in trapsRes.Body:gmatch("[^\r\n]+") do
+        for line in content:gmatch("[^\r\n]+") do
             local clean = line:gsub("[%s%c]+", ""):lower()
-            if #clean > 0 then table.insert(Config.TrapPrefixes, clean) end
+            if #clean > 0 then
+                table.insert(Config.TrapPrefixes, clean)
+            end
         end
         RefreshTrapLookup()
         UpdateStatus("Loaded " .. #Config.TrapPrefixes .. " traps!", THEME.Success)
     else
-        UpdateStatus("Could not load traps!", Color3.fromRGB(255, 80, 80))
+        UpdateStatus("No traps.txt found! Using existing config.", Color3.fromRGB(255, 150, 100))
     end
     
     SaveConfig()
