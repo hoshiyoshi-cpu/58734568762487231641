@@ -3267,6 +3267,12 @@ UpdateList = function(detectedText, requiredLetter)
                 btn.BackgroundColor3 = THEME.ItemBG
                 if lbl then lbl.TextColor3 = THEME.Text end
                 
+                -- Check if this is a PRO word (in Pro mode)
+                local isProWord = false
+                if sortMode == "Pro" and ProWordsLookup and ProWordsLookup[w] then
+                    isProWord = true
+                end
+                
                 local existingIndicator = btn:FindFirstChild("GiveIndicator")
                 if giveWordsLookupLocal and giveWordsLookupLocal[w] then
                     if not existingIndicator then
@@ -3275,12 +3281,16 @@ UpdateList = function(detectedText, requiredLetter)
                         giveIndicator.Size = UDim2.new(0, 30, 1, 0)
                         giveIndicator.Position = UDim2.new(1, -35, 0, 0)
                         giveIndicator.BackgroundTransparency = 1
-                        giveIndicator.Text = "🎁"
+                        giveIndicator.Text = isProWord and "⭐" or "🎁"
                         giveIndicator.Font = Enum.Font.GothamBold
                         giveIndicator.TextSize = 12
-                        giveIndicator.TextColor3 = THEME.Success
+                        giveIndicator.TextColor3 = isProWord and Color3.fromRGB(255, 215, 0) or THEME.Success
                         giveIndicator.TextXAlignment = Enum.TextXAlignment.Right
                         if lbl then lbl.Size = UDim2.new(1, -45, 1, 0) end
+                    elseif existingIndicator then
+                        -- Update existing indicator if PRO status changed
+                        existingIndicator.Text = isProWord and "⭐" or "🎁"
+                        existingIndicator.TextColor3 = isProWord and Color3.fromRGB(255, 215, 0) or THEME.Success
                     end
                 elseif existingIndicator then
                     existingIndicator:Destroy()
